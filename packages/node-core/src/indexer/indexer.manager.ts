@@ -5,8 +5,8 @@ import assert from 'assert';
 import {BaseCustomDataSource, BaseDataSource} from '@subql/types-core';
 import {IApi} from '../api.service';
 import {NodeConfig} from '../configure';
-import {MonitorServiceInterface} from '../indexer/monitor.service';
 import {getLogger} from '../logger';
+import {exitWithError, monitorWrite} from '../process';
 import {profilerWrap} from '../profiler';
 import {handledStringify} from './../utils';
 import {ProcessBlockResponse} from './blockDispatcher';
@@ -66,8 +66,7 @@ export abstract class BaseIndexerManager<
     private dynamicDsService: DynamicDsService<DS>,
     private unfinalizedBlocksService: IUnfinalizedBlocksService<B>,
     private filterMap: FilterMap,
-    private processorMap: ProcessorMap,
-    private monitorService?: MonitorServiceInterface
+    private processorMap: ProcessorMap
   ) {
     logger.info('indexer manager start');
   }
@@ -87,7 +86,7 @@ export abstract class BaseIndexerManager<
   ): Promise<ProcessBlockResponse> {
     let dynamicDsCreated = false;
     const blockHeight = block.getHeader().blockHeight;
-    this.monitorService?.write(`- BlockHash: ${block.getHeader().blockHash}`);
+    monitorWrite(`- BlockHash: ${block.getHeader().blockHash}`);
 
     const filteredDataSources = this.filterDataSources(blockHeight, dataSources);
 
@@ -157,16 +156,16 @@ export abstract class BaseIndexerManager<
 
   private assertDataSources(ds: DS[], blockHeight: number) {
     if (!ds.length) {
-      logger.error(
+      exitWithError(
         `Issue detected with data sources: \n
         Either all data sources have a 'startBlock' greater than the current indexed block height (${blockHeight}),
         or they have an 'endBlock' less than the current block. \n
         Solution options: \n
         1. Adjust 'startBlock' in project.yaml to be less than or equal to ${blockHeight},
            and 'endBlock' to be greater than or equal to ${blockHeight}. \n
-        2. Delete your database and start again with the currently specified 'startBlock' and 'endBlock'.`
+        2. Delete your database and start again with the currently specified 'startBlock' and 'endBlock'.`,
+        logger
       );
-      process.exit(1);
     }
   }
 
@@ -190,7 +189,7 @@ export abstract class BaseIndexerManager<
 
         const parsedData = await this.prepareFilteredData(kind, data, ds);
 
-        this.monitorService?.write(`- Handler: ${handler.handler}, args:${handledStringify(data)}`);
+        monitorWrite(`- Handler: ${handler.handler}, args:${handledStringify(data)}`);
         this.nodeConfig.profiler
           ? await profilerWrap(
               vm.securedExec.bind(vm),
@@ -209,7 +208,7 @@ export abstract class BaseIndexerManager<
       for (const handler of handlers) {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         vm = vm! ?? (await getVM(ds));
-        this.monitorService?.write(`- Handler: ${handler.handler}, args:${handledStringify(data)}`);
+        monitorWrite(`- Handler: ${handler.handler}, args:${handledStringify(data)}`);
         await this.transformAndExecuteCustomDs(ds, vm, handler, data);
       }
     }

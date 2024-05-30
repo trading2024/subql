@@ -88,7 +88,6 @@ import { UnfinalizedBlocksService } from './unfinalizedBlocks.service';
               storeCacheService,
               poiSyncService,
               project,
-              monitorService,
             ),
       inject: [
         NodeConfig,
@@ -126,6 +125,6 @@ import { UnfinalizedBlocksService } from './unfinalizedBlocks.service';
     UnfinalizedBlocksService,
     RuntimeService,
   ],
-  exports: [StoreService, StoreCacheService, MonitorService],
+  exports: [StoreService, StoreCacheService, MonitorService, PoiService],
 })
 export class FetchModule {}

@@ -23,8 +23,8 @@ import {
   getTriggers,
   SchemaMigrationService,
 } from '../db';
-import {MonitorService} from '../indexer/monitor.service';
 import {getLogger} from '../logger';
+import {exitWithError} from '../process';
 import {camelCaseObjectKey} from '../utils';
 import {MetadataFactory, MetadataRepo, PoiFactory, PoiFactoryDeprecate, PoiRepo} from './entities';
 import {Store} from './store';
@@ -67,8 +67,7 @@ export class StoreService {
     private sequelize: Sequelize,
     private config: NodeConfig,
     readonly storeCache: StoreCacheService,
-    @Inject('ISubqueryProject') private subqueryProject: ISubqueryProject<IProjectNetworkConfig>,
-    private monitorService?: MonitorService
+    @Inject('ISubqueryProject') private subqueryProject: ISubqueryProject<IProjectNetworkConfig>
   ) {}
 
   private get modelIndexedFields(): IndexField[] {
@@ -153,8 +152,7 @@ export class StoreService {
     try {
       await this.syncSchema(schema);
     } catch (e: any) {
-      logger.error(e, `Having a problem when syncing schema`);
-      process.exit(1);
+      exitWithError(new Error(`Having a problem when syncing schema`, {cause: e}), logger);
     }
     await this.updateModels(schema, modelsRelations);
   }
@@ -211,8 +209,7 @@ export class StoreService {
     try {
       this._modelIndexedFields = await this.getAllIndexFields(schema);
     } catch (e: any) {
-      logger.error(e, `Having a problem when get indexed fields`);
-      process.exit(1);
+      exitWithError(new Error(`Having a problem when get indexed fields`, {cause: e}), logger);
     }
   }
 
@@ -274,10 +271,10 @@ export class StoreService {
       );
 
       if (metadataTableNames.length > 1 && !multiChain) {
-        logger.error(
-          'There are multiple projects in the database schema, if you are trying to multi-chain index use --multi-chain'
+        exitWithError(
+          'There are multiple projects in the database schema, if you are trying to multi-chain index use --multi-chain',
+          logger
         );
-        process.exit(1);
       }
 
       if (metadataTableNames.length === 1) {
@@ -315,7 +312,7 @@ export class StoreService {
   setBlockHeight(blockHeight: number): void {
     this._blockHeight = blockHeight;
     if (this.config.proofOfIndex) {
-      this.operationStack = new StoreOperations(this.modelsRelations.models, this.monitorService);
+      this.operationStack = new StoreOperations(this.modelsRelations.models);
     }
   }
 
@@ -425,7 +422,7 @@ group by
   }
 
   getStore(): Store {
-    return new Store(this.config, this.storeCache, this, this.monitorService);
+    return new Store(this.config, this.storeCache, this);
   }
 }
 
