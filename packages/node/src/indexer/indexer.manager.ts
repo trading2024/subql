@@ -16,7 +16,6 @@ import {
 } from '@subql/common-substrate';
 import {
   NodeConfig,
-  getLogger,
   profiler,
   SandboxService,
   IndexerSandbox,
@@ -24,7 +23,6 @@ import {
   BaseIndexerManager,
   IBlock,
 } from '@subql/node-core';
-import { MonitorService } from '@subql/node-core/indexer/monitor.service';
 import {
   LightSubstrateEvent,
   SubstrateBlock,

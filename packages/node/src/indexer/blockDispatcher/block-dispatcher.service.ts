@@ -14,7 +14,6 @@ import {
   PoiSyncService,
   IBlock,
 } from '@subql/node-core';
-import { MonitorServiceInterface } from '@subql/node-core/indexer/monitor.service';
 import { SubstrateDatasource } from '@subql/types';
 import { SubqueryProject } from '../../configure/SubqueryProject';
 import { ApiService } from '../api.service';

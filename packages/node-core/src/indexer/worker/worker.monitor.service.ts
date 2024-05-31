@@ -3,7 +3,7 @@
 
 import {isMainThread} from 'worker_threads';
 import {Injectable} from '@nestjs/common';
-import {setMonitorService} from '@subql/node-core/process';
+import {setMonitorService} from '../../process';
 import {MonitorServiceInterface} from '../monitor.service';
 
 type HostMonitorService = {
