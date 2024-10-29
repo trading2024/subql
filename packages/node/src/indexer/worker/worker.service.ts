@@ -17,7 +17,7 @@ import { IndexerManager } from '../indexer.manager';
 import { WorkerRuntimeService } from '../runtime/workerRuntimeService';
 import { BlockContent, isFullBlock, LightBlockContent } from '../types';
 
-export type FetchBlockResponse = { specVersion: number; parentHash: string };
+export type FetchBlockResponse = { specVersion?: number; parentHash: string };
 
 @Injectable()
 export class WorkerService extends BaseWorkerService<
@@ -41,7 +41,7 @@ export class WorkerService extends BaseWorkerService<
 
   protected async fetchChainBlock(
     height: number,
-    { specVersion },
+    { specVersion }: { specVersion: number },
   ): Promise<IBlock<BlockContent | LightBlockContent>> {
     const specChanged = await this.workerRuntimeService.specChanged(
       height,

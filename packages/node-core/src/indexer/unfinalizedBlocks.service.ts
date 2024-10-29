@@ -6,6 +6,7 @@ import {isEqual, last} from 'lodash';
 import {NodeConfig} from '../configure';
 import {Header, IBlock} from '../indexer/types';
 import {getLogger} from '../logger';
+import {exitWithError} from '../process';
 import {mainThreadOnly} from '../utils';
 import {ProofOfIndex} from './entities';
 import {PoiBlock} from './poi';
@@ -22,13 +23,17 @@ const UNFINALIZED_THRESHOLD = 200;
 
 type UnfinalizedBlocks = Header[];
 
-export interface IUnfinalizedBlocksService<B> {
+export interface IUnfinalizedBlocksService<B> extends IUnfinalizedBlocksServiceUtil {
   init(reindex: (targetHeight: number) => Promise<void>): Promise<number | undefined>;
   processUnfinalizedBlocks(block: IBlock<B> | undefined): Promise<number | undefined>;
   processUnfinalizedBlockHeader(header: Header | undefined): Promise<number | undefined>;
   resetUnfinalizedBlocks(): void;
   resetLastFinalizedVerifiedHeight(): void;
   getMetadataUnfinalizedBlocks(): Promise<UnfinalizedBlocks>;
+}
+
+export interface IUnfinalizedBlocksServiceUtil {
+  registerFinalizedBlock(header: Header): void;
 }
 
 export abstract class BaseUnfinalizedBlocksService<B> implements IUnfinalizedBlocksService<B> {
@@ -131,10 +136,10 @@ export abstract class BaseUnfinalizedBlocksService<B> implements IUnfinalizedBlo
     // Ensure order
     const lastUnfinalizedHeight = last(this.unfinalizedBlocks)?.blockHeight;
     if (lastUnfinalizedHeight !== undefined && lastUnfinalizedHeight + 1 !== header.blockHeight) {
-      logger.error(
-        `Unfinalized block is not sequential, lastUnfinalizedBlock='${lastUnfinalizedHeight}', newUnfinalizedBlock='${header.blockHeight}'`
+      exitWithError(
+        `Unfinalized block is not sequential, lastUnfinalizedBlock='${lastUnfinalizedHeight}', newUnfinalizedBlock='${header.blockHeight}'`,
+        logger
       );
-      process.exit(1);
     }
 
     this.unfinalizedBlocks.push(header);

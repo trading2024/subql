@@ -6,7 +6,9 @@ import {BaseCustomDataSource, BaseDataSource} from '@subql/types-core';
 import {IApi} from '../api.service';
 import {NodeConfig} from '../configure';
 import {getLogger} from '../logger';
+import {exitWithError, monitorWrite} from '../process';
 import {profilerWrap} from '../profiler';
+import {handledStringify} from './../utils';
 import {ProcessBlockResponse} from './blockDispatcher';
 import {asSecondLayerHandlerProcessor_1_0_0, BaseDsProcessorService} from './ds-processor.service';
 import {DynamicDsService} from './dynamic-ds.service';
@@ -21,8 +23,10 @@ export type FilterTypeMap<DS extends BaseDataSource = BaseDataSource> = Record<
   string,
   (data: any, filter: any, ds: DS) => boolean
 >;
-export type ProcessorTypeMap<FM extends FilterTypeMap> = {[K in keyof FM]: (data: any) => boolean};
-export type HandlerInputTypeMap<FM extends FilterTypeMap> = {[K in keyof FM]: any};
+export type ProcessorTypeMap<DS extends BaseDataSource, FM extends FilterTypeMap<DS>> = {
+  [K in keyof FM]: (data: any) => boolean;
+};
+export type HandlerInputTypeMap<DS extends BaseDataSource, FM extends FilterTypeMap<DS>> = {[K in keyof FM]: any};
 
 export interface CustomHandler<K extends string = string, F = Record<string, unknown>> {
   handler: string;
@@ -37,9 +41,9 @@ export abstract class BaseIndexerManager<
   API extends IApi<A, SA, IBlock<B>[]>,
   DS extends BaseDataSource,
   CDS extends DS & BaseCustomDataSource, // Custom datasource
-  FilterMap extends FilterTypeMap,
-  ProcessorMap extends ProcessorTypeMap<FilterMap>,
-  HandlerInputMap extends HandlerInputTypeMap<FilterMap>
+  FilterMap extends FilterTypeMap<DS>,
+  ProcessorMap extends ProcessorTypeMap<DS, FilterMap>,
+  HandlerInputMap extends HandlerInputTypeMap<DS, FilterMap>,
 > implements IIndexerManager<B, DS>
 {
   abstract indexBlock(block: IBlock<B>, datasources: DS[], ...args: any[]): Promise<ProcessBlockResponse>;
@@ -84,6 +88,7 @@ export abstract class BaseIndexerManager<
   ): Promise<ProcessBlockResponse> {
     let dynamicDsCreated = false;
     const blockHeight = block.getHeader().blockHeight;
+    monitorWrite(`- BlockHash: ${block.getHeader().blockHash}`);
 
     const filteredDataSources = this.filterDataSources(blockHeight, dataSources);
 
@@ -153,16 +158,16 @@ export abstract class BaseIndexerManager<
 
   private assertDataSources(ds: DS[], blockHeight: number) {
     if (!ds.length) {
-      logger.error(
+      exitWithError(
         `Issue detected with data sources: \n
         Either all data sources have a 'startBlock' greater than the current indexed block height (${blockHeight}),
         or they have an 'endBlock' less than the current block. \n
         Solution options: \n
         1. Adjust 'startBlock' in project.yaml to be less than or equal to ${blockHeight},
            and 'endBlock' to be greater than or equal to ${blockHeight}. \n
-        2. Delete your database and start again with the currently specified 'startBlock' and 'endBlock'.`
+        2. Delete your database and start again with the currently specified 'startBlock' and 'endBlock'.`,
+        logger
       );
-      process.exit(1);
     }
   }
 
@@ -186,6 +191,7 @@ export abstract class BaseIndexerManager<
 
         const parsedData = await this.prepareFilteredData(kind, data, ds);
 
+        monitorWrite(`- Handler: ${handler.handler}, args:${handledStringify(data)}`);
         this.nodeConfig.profiler
           ? await profilerWrap(
               vm.securedExec.bind(vm),
@@ -204,6 +210,7 @@ export abstract class BaseIndexerManager<
       for (const handler of handlers) {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         vm = vm! ?? (await getVM(ds));
+        monitorWrite(`- Handler: ${handler.handler}, args:${handledStringify(data)}`);
         await this.transformAndExecuteCustomDs(ds, vm, handler, data);
       }
     }

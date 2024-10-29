@@ -6,6 +6,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.3] - 2024-10-23
+### Fixed
+- Bump version `@subql/types-core`
+
+## [3.11.2] - 2024-08-14
+### Added
+- Update polkadot/api library
+
+## [3.11.1] - 2024-08-12
+### Fixed
+- DS Processor types not being able to distinguish input and filter types (#2522)
+
+## [3.11.0] - 2024-08-05
+### Changed
+- Update dependencies (#2518)
+
+## [3.10.0] - 2024-08-01
+### Fixed
+- Fix timestamp can be undefined (#2514)
+
+### Changed
+- Bump version with `@subql/types-core`
+
+## [3.9.0] - 2024-07-09
+### Changed
+- Enable TS strict setting.
+
+### Removed
+- Deprecated types relating to datasource processors (#2475)
+
+## [3.8.0] - 2024-07-01
+### Changed
+- Bump version with `@subql/types-core`
+
+## [3.7.0] - 2024-06-21
+### Changed
+- Bump version with `@subql/types-core`
+
+## [3.6.1] - 2024-06-12
+### Changed
+- Update polkadot dependencies to 11.2.1 (#2440)
+
 ## [3.6.0] - 2024-05-08
 ### Changed
 - Update polkadot dependencies to v11
@@ -229,7 +271,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - support block handler
 
-[Unreleased]: https://github.com/subquery/subql/compare/types/3.6.0...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/types/3.11.3...HEAD
+[3.11.3]: https://github.com/subquery/subql/compare/types/3.11.2...types/3.11.3
+[3.11.2]: https://github.com/subquery/subql/compare/types/3.11.1...types/3.11.2
+[3.11.1]: https://github.com/subquery/subql/compare/types/3.11.0...types/3.11.1
+[3.11.0]: https://github.com/subquery/subql/compare/types/3.10.0...types/3.11.0
+[3.10.0]: https://github.com/subquery/subql/compare/types/3.9.0...types/3.10.0
+[3.9.0]: https://github.com/subquery/subql/compare/types/3.8.0...types/3.9.0
+[3.8.0]: https://github.com/subquery/subql/compare/types/3.7.0...types/3.8.0
+[3.7.0]: https://github.com/subquery/subql/compare/types/3.6.1...types/3.7.0
+[3.6.1]: https://github.com/subquery/subql/compare/types/3.6.0...types/3.6.1
 [3.6.0]: https://github.com/subquery/subql/compare/types/3.5.0...types/3.6.0
 [3.5.0]: https://github.com/subquery/subql/compare/types/3.4.0...types/3.5.0
 [3.4.0]: https://github.com/subquery/subql/compare/types/3.3.1...types/3.4.0

@@ -1,6 +1,7 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -9,17 +10,11 @@ import {
   isFileReference,
   validateCommonProjectManifest,
   mapToObject,
+  getProjectNetwork,
+  IPFSHTTPClientLite,
 } from '@subql/common';
-import {parseAlgorandProjectManifest} from '@subql/common-algorand';
-import {parseConcordiumProjectManifest} from '@subql/common-concordium';
-import {parseCosmosProjectManifest} from '@subql/common-cosmos';
-import {parseEthereumProjectManifest} from '@subql/common-ethereum';
-import {parseEthereumProjectManifest as parseFlareProjectManifest} from '@subql/common-flare';
-import {parseNearProjectManifest} from '@subql/common-near';
-import {parseStellarProjectManifest} from '@subql/common-stellar';
-import {parseSubstrateProjectManifest} from '@subql/common-substrate';
 import {Reader} from '@subql/types-core';
-import {IPFSHTTPClient, create} from 'ipfs-http-client';
+import {loadDependency} from '../modulars';
 
 const PIN_SERVICE = 'onfinality';
 
@@ -51,9 +46,9 @@ export async function uploadToIpfs(
 
   const contents: {path: string; content: string}[] = [];
 
-  let ipfs: IPFSHTTPClient;
+  let ipfs: IPFSHTTPClientLite | undefined;
   if (ipfsEndpoint) {
-    ipfs = create({url: ipfsEndpoint});
+    ipfs = new IPFSHTTPClientLite({url: ipfsEndpoint});
   }
 
   for (const project in projectToReader) {
@@ -62,31 +57,23 @@ export async function uploadToIpfs(
 
     validateCommonProjectManifest(schema);
 
-    const parsingFunctions = [
-      parseSubstrateProjectManifest,
-      parseCosmosProjectManifest,
-      parseAlgorandProjectManifest,
-      parseEthereumProjectManifest,
-      parseFlareProjectManifest,
-      parseNearProjectManifest,
-      parseStellarProjectManifest,
-      parseConcordiumProjectManifest,
-    ];
+    const networkFamily = getProjectNetwork(schema);
+    const module = loadDependency(networkFamily);
+    assert(module, `Failed to load module for network ${networkFamily}`);
 
-    let manifest = null;
-    for (const parseFunction of parsingFunctions) {
-      try {
-        manifest = parseFunction(schema).asImpl;
-        break; // Exit the loop if successful
-      } catch (e) {
-        // Continue to the next parsing function
-      }
+    let manifest;
+
+    try {
+      manifest = module.parseProjectManifest(schema).asImpl;
+    } catch (e) {
+      throw new Error(`Failed to parse project manifest for network ${networkFamily}`, {cause: e});
     }
 
     if (manifest === null) {
       throw new Error('Unable to parse project manifest');
     }
 
+    assert(reader.root, 'Reader root is not set');
     // the JSON object conversion must occur on manifest.deployment
     const deployment = await replaceFileReferences(reader.root, manifest.deployment, authToken, ipfs);
 
@@ -110,11 +97,11 @@ export async function uploadToIpfs(
 }
 
 /* Recursively finds all FileReferences in an object and replaces the files with IPFS references */
-async function replaceFileReferences<T>(
+async function replaceFileReferences<T extends Record<string, any>>(
   projectDir: string,
   input: T,
   authToken: string,
-  ipfs?: IPFSHTTPClient
+  ipfs?: IPFSHTTPClientLite
 ): Promise<T> {
   if (Array.isArray(input)) {
     return (await Promise.all(
@@ -149,40 +136,40 @@ export async function uploadFiles(
   contents: {path: string; content: string}[],
   authToken: string,
   isMultichain?: boolean,
-  ipfs?: IPFSHTTPClient
+  ipfs?: IPFSHTTPClientLite
 ): Promise<Map<string, string>> {
   const fileCidMap: Map<string, string> = new Map();
 
   if (ipfs) {
     try {
-      const results = ipfs.addAll(contents, {wrapWithDirectory: isMultichain});
+      const results = await ipfs.addAll(contents, {wrapWithDirectory: isMultichain});
 
-      for await (const result of results) {
+      for (const result of results) {
         fileCidMap.set(result.path, result.cid.toString());
       }
     } catch (e) {
-      throw new Error(`Publish project to provided IPFS gateway failed, ${e}`);
+      throw new Error(`Publish project to provided IPFS gateway failed`, {cause: e});
     }
   }
 
-  const ipfsWrite = create({
+  const ipfsWrite = new IPFSHTTPClientLite({
     url: IPFS_WRITE_ENDPOINT,
     headers: {Authorization: `Bearer ${authToken}`},
   });
 
   try {
-    const results = ipfsWrite.addAll(contents, {pin: true, cidVersion: 0, wrapWithDirectory: isMultichain});
-    for await (const result of results) {
-      fileCidMap.set(result.path, result.cid.toString());
+    const results = await ipfsWrite.addAll(contents, {pin: true, cidVersion: 0, wrapWithDirectory: isMultichain});
+    for (const result of results) {
+      fileCidMap.set(result.path, result.cid);
 
-      await ipfsWrite.pin.remote.add(result.cid, {service: PIN_SERVICE}).catch((e) => {
+      await ipfsWrite.pinRemoteAdd(result.cid, {service: PIN_SERVICE}).catch((e) => {
         console.warn(
           `Failed to pin file ${result.path}. There might be problems with this file being accessible later. ${e}`
         );
       });
     }
   } catch (e) {
-    throw new Error(`Publish project to default failed, ${e}`);
+    throw new Error(`Publish project files to IPFS failed`, {cause: e});
   }
 
   return fileCidMap;
@@ -191,23 +178,24 @@ export async function uploadFiles(
 export async function uploadFile(
   contents: {path: string; content: string},
   authToken: string,
-  ipfs?: IPFSHTTPClient
+  ipfs?: IPFSHTTPClientLite
 ): Promise<string> {
-  if (fileMap.has(contents.path)) {
-    return fileMap.get(contents.path);
+  const pathPromise = fileMap.get(contents.path);
+  if (pathPromise !== undefined) {
+    return pathPromise;
   }
 
-  let pendingClientCid: Promise<string>;
+  let pendingClientCid: Promise<string> = Promise.resolve('');
   if (ipfs) {
     pendingClientCid = ipfs
       .add(contents.content, {pin: true, cidVersion: 0})
       .then((result) => result.cid.toString())
       .catch((e) => {
-        throw new Error(`Publish project to default failed, ${e}`);
+        throw new Error(`Publish file to provided IPFS failed`, {cause: e});
       });
   }
 
-  const ipfsWrite = create({
+  const ipfsWrite = new IPFSHTTPClientLite({
     url: IPFS_WRITE_ENDPOINT,
     headers: {Authorization: `Bearer ${authToken}`},
   });
@@ -217,7 +205,7 @@ export async function uploadFile(
     .then((result) => result.cid)
     .then(async (cid) => {
       try {
-        await ipfsWrite.pin.remote.add(cid, {service: PIN_SERVICE});
+        await ipfsWrite.pinRemoteAdd(cid, {service: PIN_SERVICE});
         return cid.toString();
       } catch (e) {
         console.warn(
@@ -227,7 +215,7 @@ export async function uploadFile(
       }
     })
     .catch((e) => {
-      throw new Error(`Publish project to default failed, ${e}`);
+      throw new Error(`Publish project to default IPFS failed`, {cause: e});
     });
 
   fileMap.set(contents.path, pendingCid);
@@ -240,4 +228,9 @@ export async function uploadFile(
   }
 
   return cid;
+}
+
+export function getDirectoryCid(fileToCidMap: Map<string, string>): string | undefined {
+  const directoryCid = fileToCidMap.get('');
+  return directoryCid;
 }

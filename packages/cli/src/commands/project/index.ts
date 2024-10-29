@@ -1,8 +1,8 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import {select} from '@inquirer/prompts';
 import {Command, Flags} from '@oclif/core';
-import * as inquirer from 'inquirer';
 import Create_project from './create-project';
 import Delete_project from './delete-project';
 
@@ -27,15 +27,10 @@ export default class Project extends Command {
     let userOptions: projectOptions;
 
     if (!option) {
-      const response = await inquirer.prompt([
-        {
-          name: 'projectOption',
-          message: 'Select an project option',
-          type: 'list',
-          choices: [{name: 'create'}, {name: 'delete'}],
-        },
-      ]);
-      userOptions = response.projectOption;
+      userOptions = await select({
+        message: 'Select an project option',
+        choices: [{value: 'create'}, {value: 'delete'}],
+      });
     } else {
       userOptions = option as projectOptions;
     }
@@ -46,7 +41,7 @@ export default class Project extends Command {
       // removes arguments -> deployment and everything before it from the process.argv
       const stripped_argv: string[] = process.argv
         .filter((v, idx) => idx > process.argv.indexOf('project') && !v.includes('--options'))
-        .reduce((acc, val) => acc.concat(val.split('=')), []);
+        .reduce((acc, val) => acc.concat(val.split('=')), [] as string[]);
 
       await handler.run(stripped_argv);
     } catch (e) {

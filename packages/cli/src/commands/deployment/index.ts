@@ -1,8 +1,8 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import {select} from '@inquirer/prompts';
 import {Command, Flags} from '@oclif/core';
-import * as inquirer from 'inquirer';
 import Delete from './delete';
 import Deploy from './deploy';
 import Promote from './promote';
@@ -31,16 +31,10 @@ export default class Deployment extends Command {
     let userOptions: DeploymentOption;
 
     if (!option) {
-      const response = await inquirer.prompt([
-        {
-          name: 'deploymentOptions',
-          message: 'Select an deployment option',
-          type: 'list',
-          choices: [{name: 'deploy'}, {name: 'promote'}, {name: 'delete'}],
-        },
-      ]);
-
-      userOptions = response.deploymentOptions;
+      userOptions = await select({
+        message: 'Select an deployment option',
+        choices: [{value: 'deploy'}, {value: 'promote'}, {value: 'delete'}],
+      });
     } else {
       userOptions = option as DeploymentOption;
     }
@@ -50,7 +44,7 @@ export default class Deployment extends Command {
       // removes arguments -> deployment and everything before it from the process.argv
       const stripped_argv: string[] = process.argv
         .filter((v, idx) => idx > process.argv.indexOf('deployment') && !v.includes('--options'))
-        .reduce((acc, val) => acc.concat(val.split('=')), []);
+        .reduce((acc, val) => acc.concat(val.split('=')), [] as string[]);
 
       await handler.run(stripped_argv);
     } catch (e) {

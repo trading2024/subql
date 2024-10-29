@@ -4,12 +4,12 @@
 import {URL} from 'url';
 import {getMetadataTableName, MetaData, METADATA_REGEX, MULTI_METADATA_REGEX, TableEstimate} from '@subql/utils';
 import {PgIntrospectionResultsByKind} from '@subql/x-graphile-build-pg';
+import {Build} from '@subql/x-postgraphile-core';
 import {makeExtendSchemaPlugin, gql} from 'graphile-utils';
 import {FieldNode, SelectionNode} from 'graphql';
 import {uniq} from 'lodash';
 import fetch, {Response} from 'node-fetch';
 import {Client} from 'pg';
-import {Build} from 'postgraphile-core';
 import {setAsyncInterval} from '../../utils/asyncInterval';
 import {argv} from '../../yargs';
 
@@ -27,12 +27,13 @@ const METADATA_TYPES = {
   indexerHealthy: 'boolean',
   indexerNodeVersion: 'string',
   queryNodeVersion: 'string',
-  dynamicDatasources: 'string',
+  dynamicDatasources: 'object',
   startHeight: 'number',
   evmChainId: 'string',
   deployments: 'string',
   lastCreatedPoiHeight: 'number',
   latestSyncedPoiHeight: 'number',
+  dbSize: 'string',
 };
 
 const METADATA_KEYS = Object.keys(METADATA_TYPES);
@@ -61,7 +62,7 @@ async function fetchFromApi(): Promise<void> {
     meta = await fetch(new URL(`meta`, indexerUrl));
     const result = await meta.json();
     Object.assign(metaCache, result);
-  } catch (e) {
+  } catch (e: any) {
     metaCache.indexerHealthy = false;
     console.warn(`Failed to fetch indexer meta, `, e.message);
   }
@@ -69,7 +70,7 @@ async function fetchFromApi(): Promise<void> {
   try {
     health = await fetch(new URL(`health`, indexerUrl));
     metaCache.indexerHealthy = !!health.ok;
-  } catch (e) {
+  } catch (e: any) {
     metaCache.indexerHealthy = false;
     console.warn(`Failed to fetch indexer health, `, e.message);
   }
@@ -180,6 +181,7 @@ function findNodePath(nodes: readonly SelectionNode[], path: string[]): FieldNod
 
     if (!newPath.length) return found;
 
+    if (!found.selectionSet) return;
     return findNodePath(found.selectionSet.selections, newPath);
   }
 }
@@ -210,13 +212,14 @@ export const GetMetadataPlugin = makeExtendSchemaPlugin((build: Build, options) 
         indexerNodeVersion: String
         queryNodeVersion: String
         rowCountEstimate: [TableEstimate]
-        dynamicDatasources: String
+        dynamicDatasources: [JSON]
         evmChainId: String
         deployments: JSON
         lastFinalizedVerifiedHeight: Int
         unfinalizedBlocks: String
         lastCreatedPoiHeight: Int
         latestSyncedPoiHeight: Int
+        dbSize: BigInt
       }
 
       type _MetadatasEdge {
@@ -235,16 +238,15 @@ export const GetMetadataPlugin = makeExtendSchemaPlugin((build: Build, options) 
 
         _metadatas(
           after: Cursor
-          before: Cursor # distinct: [_mmr_distinct_enum] = null # filter: _MetadataFilter # first: Int
+          before: Cursor # distinct: [_mmr_distinct_enum] = null # filter: _MetadataFilter # first: Int # offset: Int
         ): # last: Int
-        # offset: Int
         # orderBy: [_MetadatasOrderBy!] = [PRIMARY_KEY_ASC]
         _Metadatas
       }
     `,
     resolvers: {
       Query: {
-        _metadata: async (_parentObject, args, context, info): Promise<MetaData> => {
+        _metadata: async (_parentObject, args, context, info): Promise<MetaData | undefined> => {
           const tableExists = metadataTableSearch(build);
           if (tableExists) {
             let rowCountFound = false;

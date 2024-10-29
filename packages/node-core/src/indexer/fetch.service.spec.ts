@@ -3,9 +3,18 @@
 
 import {EventEmitter2} from '@nestjs/event-emitter';
 import {SchedulerRegistry} from '@nestjs/schedule';
-import {BaseDataSource, BaseHandler, BaseMapping, DictionaryQueryEntry, IProjectNetworkConfig} from '@subql/types-core';
+import {BaseDataSource, BaseHandler, BaseMapping, DictionaryQueryEntry} from '@subql/types-core';
 import {range} from 'lodash';
-import {BlockDispatcher, delay, IBlock, IBlockDispatcher, IProjectService, NodeConfig} from '../';
+import {
+  BaseUnfinalizedBlocksService,
+  BlockDispatcher,
+  delay,
+  Header,
+  IBlock,
+  IBlockDispatcher,
+  IProjectService,
+  NodeConfig,
+} from '../';
 import {BlockHeightMap} from '../utils/blockHeightMap';
 import {DictionaryService} from './dictionary/dictionary.service';
 import {BaseFetchService} from './fetch.service';
@@ -24,9 +33,6 @@ class TestFetchService extends BaseFetchService<BaseDataSource, IBlockDispatcher
   }
   getGenesisHash(): string {
     return genesisHash;
-  }
-  async getFinalizedHeight(): Promise<number> {
-    return Promise.resolve(this.finalizedHeight);
   }
   async getBestHeight(): Promise<number> {
     return Promise.resolve(this.bestHeight);
@@ -64,6 +70,10 @@ class TestFetchService extends BaseFetchService<BaseDataSource, IBlockDispatcher
   mockDsMap(blockHeightMap: BlockHeightMap<any>): void {
     this.projectService.getDataSourcesMap = jest.fn(() => blockHeightMap);
   }
+
+  async getFinalizedHeader(): Promise<Header> {
+    return Promise.resolve({blockHeight: this.finalizedHeight, blockHash: '0xxx', parentHash: '0xxx'});
+  }
 }
 
 const nodeConfig = new NodeConfig({
@@ -72,11 +82,6 @@ const nodeConfig = new NodeConfig({
   unfinalizedBlocks: false,
   networkDictionary: [''],
 });
-
-const getNetworkConfig = () =>
-  ({
-    dictionary: 'https://example.com',
-  } as IProjectNetworkConfig);
 
 const mockDs: BaseDataSource = {
   kind: 'mock/DataSource',
@@ -154,8 +159,9 @@ describe('Fetch Service', () => {
   let fetchService: TestFetchService;
   let blockDispatcher: IBlockDispatcher<any>;
   let dictionaryService: DictionaryService<any, any>;
-  let networkConfig: IProjectNetworkConfig;
   let dataSources: BaseDataSource[];
+  let unfinalizedBlocksService: BaseUnfinalizedBlocksService<any>;
+  let projectService: IProjectService<any>;
 
   let spyOnEnqueueSequential: jest.SpyInstance<
     void | Promise<void>,
@@ -172,7 +178,7 @@ describe('Fetch Service', () => {
     const eventEmitter = new EventEmitter2();
     const schedulerRegistry = new SchedulerRegistry();
 
-    const projectService = {
+    projectService = {
       getStartBlockFromDataSources: jest.fn(() => Math.min(...dataSources.map((ds) => ds.startBlock ?? 0))),
       getAllDataSources: jest.fn(() => dataSources),
       getDataSourcesMap: jest.fn(() => {
@@ -186,20 +192,25 @@ describe('Fetch Service', () => {
         });
         return new BlockHeightMap(x);
       }),
+      bypassBlocks: [],
     } as any as IProjectService<any>;
 
     blockDispatcher = getBlockDispatcher();
     dictionaryService = getDictionaryService();
-    networkConfig = getNetworkConfig();
 
     fetchService = new TestFetchService(
       nodeConfig,
       projectService,
-      networkConfig,
       blockDispatcher,
       dictionaryService,
       eventEmitter,
-      schedulerRegistry
+      schedulerRegistry,
+      unfinalizedBlocksService,
+      {
+        metadata: {
+          set: jest.fn(),
+        },
+      } as any
     );
 
     spyOnEnqueueSequential = jest.spyOn(fetchService as any, 'enqueueSequential') as any;
@@ -314,11 +325,12 @@ describe('Fetch Service', () => {
     );
 
     await fetchService.init(1);
-    expect((fetchService as any).bypassBlocks).toEqual(range(301, 500));
+
+    expect((fetchService as any).getDatasourceBypassBlocks()).toEqual([`301-499`]);
   });
 
   it('checks chain heads at an interval', async () => {
-    const finalizedSpy = jest.spyOn(fetchService, 'getFinalizedHeight');
+    const finalizedSpy = jest.spyOn(fetchService, 'getFinalizedHeader');
     const bestSpy = jest.spyOn(fetchService, 'getBestHeight');
 
     await fetchService.init(1);
@@ -332,7 +344,11 @@ describe('Fetch Service', () => {
     expect(finalizedSpy).toHaveBeenCalledTimes(2);
     expect(bestSpy).toHaveBeenCalledTimes(2);
 
-    await expect(fetchService.getFinalizedHeight()).resolves.toBe(fetchService.finalizedHeight);
+    await expect(fetchService.getFinalizedHeader()).resolves.toEqual({
+      blockHeight: fetchService.finalizedHeight,
+      blockHash: '0xxx',
+      parentHash: '0xxx',
+    });
   });
 
   it('enqueues blocks WITHOUT dictionary', async () => {
@@ -593,7 +609,7 @@ describe('Fetch Service', () => {
   });
 
   it('skips bypassBlocks', async () => {
-    (fetchService as any).networkConfig.bypassBlocks = [3];
+    projectService.bypassBlocks = [3];
 
     await fetchService.init(1);
 
@@ -604,12 +620,9 @@ describe('Fetch Service', () => {
 
   it('transforms bypassBlocks', async () => {
     // Set a range so on init its transformed
-    (fetchService as any).networkConfig.bypassBlocks = ['2-5'];
+    projectService.bypassBlocks = ['2-5'];
 
     await fetchService.init(1);
-
-    // This doesn't work as they get removed after that height is processed
-    // expect((fetchService as any).bypassBlocks).toEqual([2, 3, 4, 5]);
 
     // Note the batch size is smaller because we exclude from the initial batch size
     expect(enqueueBlocksSpy).toHaveBeenCalledWith([1, 6, 7, 8, 9, 10], 10);
@@ -655,8 +668,8 @@ describe('Fetch Service', () => {
   });
 
   it('throws if the start block is greater than the chain latest height', async () => {
-    await expect(() => fetchService.init(1001)).rejects.toThrow(
-      `The startBlock of dataSources in your project manifest (1001) is higher than the current chain height (1000). Please adjust your startBlock to be less that the current chain height.`
+    await expect(() => fetchService.init(1002)).rejects.toThrow(
+      `The startBlock of dataSources in your project manifest (1002) is higher than the current chain height (1000). Please adjust your startBlock to be less that the current chain height.`
     );
   });
 
@@ -676,11 +689,31 @@ describe('Fetch Service', () => {
     (fetchService as any).dictionaryService.scopedDictionaryEntries = () => {
       return undefined;
     };
+    fetchService.bestHeight = 500;
     const dictionarySpy = jest.spyOn((fetchService as any).dictionaryService, 'scopedDictionaryEntries');
     await fetchService.init(10);
     expect(dictionarySpy).toHaveBeenCalledTimes(1);
     expect(spyOnEnqueueSequential).toHaveBeenCalledTimes(1);
 
     expect(enqueueBlocksSpy).toHaveBeenLastCalledWith([10, 11, 12, 13, 14, 15, 16, 17, 18, 19], 19);
+  });
+
+  it(`doesn't use dictionary if processing near latest height`, async () => {
+    enableDictionary();
+    (fetchService as any).dictionaryService.scopedDictionaryEntries = () => {
+      return undefined;
+    };
+    fetchService.bestHeight = 500;
+    const dictionarySpy = jest.spyOn((fetchService as any).dictionaryService, 'scopedDictionaryEntries');
+    await fetchService.init(490);
+    expect(dictionarySpy).toHaveBeenCalledTimes(0);
+    expect(spyOnEnqueueSequential).toHaveBeenCalledTimes(1);
+
+    expect(enqueueBlocksSpy).toHaveBeenLastCalledWith([490, 491, 492, 493, 494, 495, 496, 497, 498, 499], 499);
+  });
+
+  it('fetch init when last processed height is same as', async () => {
+    // when last processed height is 1000, finalized height is 1000
+    await expect(fetchService.init(1001)).resolves.not.toThrow();
   });
 });

@@ -6,8 +6,8 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo",
     "rootDir": "src",
     "outDir": "./dist",
-    "noImplicitAny": true,
-    "noImplicitThis": true
+    "noImplicitThis": true,
+    "noImplicitAny": true
   },
   "references": [{"path": "../types"}],
   "include": ["src/**/*"]

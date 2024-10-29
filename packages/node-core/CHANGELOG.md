@@ -5,6 +5,143 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [14.1.6] - 2024-10-21
+### Fixed
+- Issues with setting a large block range for bypass blocks (#2566)
+- Test runner not setting lastProcessedHeight leading to data not being flushed (#2569)
+- Unable to rewind unfinalized blocks on startup (#2570)
+- Store `getByFields` returning removed cache data (#2571)
+
+### Changed
+- Throw error when store getByField(s) options.limit exceeds queryLimit option (#2567)
+
+## [14.1.5] - 2024-09-25
+### Changed
+- Bump common, Added manifest support for query-subgraph.
+
+## [14.1.4] - 2024-09-09
+### Changed
+- Reuse the same temp dir when project is from IPFS (#2551)
+
+### Fixed
+- GraphQL field support for consecutive uppercase letters.
+
+## [14.1.3] - 2024-08-30
+### Fixed
+- Fixed Corn filter (#2547)
+
+## [14.1.2] - 2024-08-14
+### Added
+- Update polkadot/api library
+
+## [14.1.1] - 2024-08-12
+### Fixed
+- revert yargs version as it was returning a promise
+- DS Processor types not being able to distinguish input and filter types (#2522)
+
+## [14.1.0] - 2024-08-05
+### Changed
+- Update dependencies (#2518)
+
+## [14.0.0] - 2024-08-01
+### Added
+- A more useful error message when failing to require modules from the VM (#2512)
+- Support for endpoint configs (#2511)
+
+### Fixed
+- Handle when block timestamp can be undefined (#2513)
+
+## [13.0.2] - 2024-07-31
+### Fixed
+- Fixed project upgrade missing reload network chainTypes when `onProjectChange` (#2505)
+
+## [13.0.1] - 2024-07-29
+### Fixed
+- Fixed get and set data not been deepCloned and data is not mutable
+- Improved get bigInt type from json type
+
+## [13.0.0] - 2024-07-25
+### Changed
+- Breaking change: Require indexing environment timezone set to UTC, avoid inconsistent result from cache and database (#2495)
+
+### Fixed
+- Fix handle bigint type in jsonb array, both get and set method will generate consistent result (#2495)
+- Update with `@subql/utils`, fixed json and json array hashcode issue, improve poi consistency (#2497)
+
+### Added
+- SubqueryProject base from extracting common code (#2496)
+
+## [12.0.0] - 2024-07-22
+### Changed
+- Provide a better error message when user increases project start height beyond indexed height (#2492)
+- Define new core modules to reduce duplicate code in nodes (#2491)
+
+### Fixed
+- "targetHeight" being updated out of sync with indexing, leading to it possibly being behind "lastProcessedHeight" (#2491)
+
+## [11.0.0] - 2024-07-11
+### Changed
+- Create interval for flushing the cache, this is to support chains that only produce blocks with new transactions (#2485)
+- Improved types for strict TS setting (#2484)
+
+### Fixed
+- Improve indexer could stall due to rpc finalized height could be smaller than previous result (#2487)
+
+## [10.10.2] - 2024-07-10
+### Fixed
+- Fix issue admin api can not get `dbSize` due to it not been set in \_metadata table
+
+## [10.10.1] - 2024-07-09
+### Added
+- Enable ts strict setting
+
+### Fixed
+- Incrementing the schemaMigration count on every start (#2476)
+
+## [10.10.0] - 2024-07-01
+### Changed
+- Bump version with `@subql/common`
+
+## [10.9.0] - 2024-06-21
+### Fixed
+- Store service index check failing with snake_case fields (#2461)
+
+### Changed
+- Error message for finding available port
+
+## [10.6.0] - 2024-06-18
+### Fixed
+- Testing framework logging the same date if they were within 1s (#2453)
+
+### Fixed
+- Handle edge case when last processed height is same as chain target height, app will wait for new block rather than exit.
+
+### Changed
+- Skip using the dictionary if processing data within batch size of latest height (#2454)
+
+## [10.5.1] - 2024-06-12
+### Changed
+- Update `@subql/utils`
+
+## [10.5.0] - 2024-06-12
+### Added
+- Admin api add query `/db_size` to check database size and upsert in metadata
+
+### Fixed
+- `exitWithError` logging error messages rather than the error (#2435)
+
+### Changed
+- Logging around switching dictionary (#2435)
+
+## [10.4.1] - 2024-06-06
+### Fixed
+- Fix various issue in monitor service, file naming issue and export admin service from node-core
+
+## [10.4.0] - 2024-06-05
+### Added
+- Add monitor service to record block indexing actions in order to improve POI accuracy, and provide debug info for Admin api
+
 ### Fixed
 - Update index block failed message  (#2414)
 
@@ -699,7 +836,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Move blockchain agnostic code from `node` to `node-core` package. (#1222)
 
-[Unreleased]: https://github.com/subquery/subql/compare/node-core/10.3.2...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/node-core/14.1.6...HEAD
+[14.1.6]: https://github.com/subquery/subql/compare/node-core/14.1.5...node-core/14.1.6
+[14.1.5]: https://github.com/subquery/subql/compare/node-core/14.1.4...node-core/14.1.5
+[14.1.4]: https://github.com/subquery/subql/compare/node-core/14.1.3...node-core/14.1.4
+[14.1.3]: https://github.com/subquery/subql/compare/node-core/14.1.2...node-core/14.1.3
+[14.1.2]: https://github.com/subquery/subql/compare/node-core/14.1.1...node-core/14.1.2
+[14.1.1]: https://github.com/subquery/subql/compare/node-core/14.1.0...node-core/14.1.1
+[14.1.0]: https://github.com/subquery/subql/compare/node-core/14.0.0...node-core/14.1.0
+[14.0.0]: https://github.com/subquery/subql/compare/node-core/13.0.2...node-core/14.0.0
+[13.0.2]: https://github.com/subquery/subql/compare/node-core/13.0.1...node-core/13.0.2
+[13.0.1]: https://github.com/subquery/subql/compare/node-core/13.0.0...node-core/13.0.1
+[13.0.0]: https://github.com/subquery/subql/compare/node-core/12.0.0...node-core/13.0.0
+[12.0.0]: https://github.com/subquery/subql/compare/node-core/11.0.0...node-core/12.0.0
+[11.0.0]: https://github.com/subquery/subql/compare/node-core/10.10.2...node-core/11.0.0
+[10.10.2]: https://github.com/subquery/subql/compare/node-core/10.10.1...node-core/10.10.2
+[10.10.1]: https://github.com/subquery/subql/compare/node-core/10.10.0...node-core/10.10.1
+[10.10.0]: https://github.com/subquery/subql/compare/node-core/10.9.0...node-core/10.10.0
+[10.9.0]: https://github.com/subquery/subql/compare/node-core/10.6.0...node-core/10.9.0
+[10.6.0]: https://github.com/subquery/subql/compare/node-core/10.5.1...node-core/10.6.0
+[10.5.1]: https://github.com/subquery/subql/compare/node-core/10.5.0...node-core/10.5.1
+[10.5.0]: https://github.com/subquery/subql/compare/node-core/10.4.1...node-core/10.5.0
+[10.4.1]: https://github.com/subquery/subql/compare/node-core/10.4.0...node-core/10.4.1
+[10.4.0]: https://github.com/subquery/subql/compare/node-core/10.3.2...node-core/10.4.0
 [10.3.2]: https://github.com/subquery/subql/compare/node-core/10.3.1...node-core/10.3.2
 [10.3.1]: https://github.com/subquery/subql/compare/node-core/10.3.0...node-core/10.3.1
 [10.3.0]: https://github.com/subquery/subql/compare/node-core/10.2.0...node-core/10.3.0

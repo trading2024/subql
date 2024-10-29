@@ -3,10 +3,10 @@
 
 import {u8aConcat} from '@polkadot/util';
 import {Reader} from '@subql/types-core';
-import {IPFSHTTPClient, create} from 'ipfs-http-client';
 import yaml from 'js-yaml';
-import {IPackageJson} from 'package-json-type';
+import type {IPackageJson} from 'package-json-type';
 import {IPFS_NODE_ENDPOINT} from '../../constants';
+import {IPFSHTTPClientLite} from '../IpfsHttpClientLite';
 
 const CIDv0 = new RegExp(/Qm[1-9A-Za-z]{44}[^OIl]/i);
 const CIDv1 = new RegExp(
@@ -14,33 +14,31 @@ const CIDv1 = new RegExp(
 );
 
 export class IPFSReader implements Reader {
-  private ipfs: IPFSHTTPClient;
+  private ipfs: IPFSHTTPClientLite;
   private cache: Record<string, Promise<string>> = {};
 
-  constructor(private readonly cid: string, gateway?: string) {
+  constructor(readonly cid: string, gateway?: string) {
     if (!CIDv0.test(cid) && !CIDv1.test(cid)) {
       throw new Error('IPFS project path CID is not valid');
     }
-    this.ipfs = create({url: gateway ?? IPFS_NODE_ENDPOINT});
+    this.ipfs = new IPFSHTTPClientLite({url: gateway ?? IPFS_NODE_ENDPOINT});
   }
 
   get root(): undefined {
     return undefined;
   }
 
-  async getPkg(): Promise<IPackageJson | undefined> {
-    return Promise.resolve(undefined);
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getPkg(): Promise<IPackageJson> {
+    throw new Error("IPFS Reader doesn't support reading package.json");
   }
 
-  async getProjectSchema(): Promise<unknown | undefined> {
+  async getProjectSchema(): Promise<unknown> {
     const projectYaml = await this.getFile(this.cid);
-    if (projectYaml === undefined) {
-      throw new Error(`Failed to fetch project from IPFS: ${this.cid}`);
-    }
     return yaml.load(projectYaml);
   }
 
-  async getFile(fileName: string): Promise<string | undefined> {
+  async getFile(fileName: string): Promise<string> {
     try {
       if (this.cache[fileName] === undefined) {
         const resolvedFileName = fileName.replace('ipfs://', '');
@@ -49,7 +47,7 @@ export class IPFSReader implements Reader {
       return await this.cache[fileName];
     } catch (e) {
       console.error(`Failed to fetch file from IPFS: ${fileName}`, e);
-      return undefined;
+      throw new Error(`Failed to fetch file from IPFS: ${fileName}`, {cause: e});
     }
   }
 

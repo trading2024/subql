@@ -4,19 +4,27 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {DEFAULT_PORT, findAvailablePort, GithubReader, IPFSReader, LocalReader} from '@subql/common';
-import {BaseAssetsDataSource, BaseCustomDataSource, BaseDataSource, Reader, TemplateBase} from '@subql/types-core';
-import {getAllEntitiesRelations} from '@subql/utils';
+import {DEFAULT_PORT, GithubReader, IPFSReader, LocalReader} from '@subql/common';
+import {
+  BaseAssetsDataSource,
+  BaseCustomDataSource,
+  BaseDataSource,
+  BaseTemplateDataSource,
+  Reader,
+} from '@subql/types-core';
+import {findAvailablePort} from '@subql/utils';
 import {QueryTypes, Sequelize} from '@subql/x-sequelize';
-import {stringToArray, getSchedule} from 'cron-converter';
+import {stringToArray, getSchedule, Schedule} from 'cron-converter';
 import tar from 'tar';
 import {NodeConfig} from '../configure/NodeConfig';
-import {ISubqueryProject, StoreService} from '../indexer';
+import {StoreService} from '../indexer';
 import {getLogger} from '../logger';
+import {exitWithError} from '../process';
+import {CronFilter} from './blocks';
 
 const logger = getLogger('Project-Utils');
 
-export async function getValidPort(argvPort: number): Promise<number> {
+export async function getValidPort(argvPort?: number): Promise<number> {
   const validate = (x: any) => {
     const p = parseInt(x);
     return isNaN(p) ? null : p;
@@ -24,12 +32,10 @@ export async function getValidPort(argvPort: number): Promise<number> {
 
   const port = validate(argvPort) ?? (await findAvailablePort(DEFAULT_PORT));
   if (!port) {
-    logger.error(
-      `Unable to find available port (tried ports in range (${port}..${
-        port + 10
-      })). Try setting a free port manually by setting the --port flag`
-    );
-    process.exit(1);
+    const errMsg = `Unable to find available port (tried ports in range (${DEFAULT_PORT}..${
+      DEFAULT_PORT + 10
+    })). Try setting a free port manually by setting the --port flag`;
+    exitWithError(errMsg, logger);
   }
   return port;
 }
@@ -62,8 +68,7 @@ export async function getExistingProjectSchema(
     });
     schemas = result.map((x: any) => x.schema_name);
   } catch (err) {
-    logger.error(`Unable to fetch all schemas: ${err}`);
-    process.exit(1);
+    exitWithError(new Error(`Unable to fetch all schemas`, {cause: err}), logger);
   }
   if (!schemas.includes(schema)) {
     return undefined;
@@ -83,7 +88,7 @@ export async function getEnumDeprecated(sequelize: Sequelize, enumTypeNameDeprec
   return resultsDeprecated;
 }
 
-type IsCustomDs<DS, CDS> = (x: DS | CDS) => x is CDS;
+export type IsCustomDs<DS, CDS> = (x: DS | CDS) => x is CDS;
 // TODO remove this type, it would result in a breaking change though
 /**
  * @deprecated Please unwrap the datasource from this type
@@ -124,7 +129,7 @@ export async function updateDataSourcesV1_0_0<DS extends BaseDataSource, CDS ext
     _dataSources.map(async (dataSource) => {
       dataSource.startBlock = dataSource.startBlock ?? 1;
       const entryScript = await loadDataSourceScript(reader, dataSource.mapping.file);
-      if (isAssetsDs(dataSource)) {
+      if (isAssetsDs(dataSource) && dataSource.assets) {
         for (const [, asset] of dataSource.assets.entries()) {
           // Only need to resolve path for local file
           if (reader instanceof LocalReader) {
@@ -218,26 +223,17 @@ export async function loadDataSourceScript(reader: Reader, file?: string): Promi
   return entryScript;
 }
 
-export async function initDbSchema(
-  project: ISubqueryProject,
-  schema: string,
-  storeService: StoreService
-): Promise<void> {
-  const modelsRelation = getAllEntitiesRelations(project.schema);
-  await storeService.init(modelsRelation, schema);
+export async function initDbSchema(schema: string, storeService: StoreService): Promise<void> {
+  await storeService.init(schema);
 }
 
-export async function initHotSchemaReload(schema: string, storeService: StoreService): Promise<void> {
-  await storeService.initHotSchemaReloadQueries(schema);
-}
-
-type IsRuntimeDs = (ds: BaseDataSource) => boolean;
+export type IsRuntimeDs<DS> = (ds: DS) => ds is DS;
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function insertBlockFiltersCronSchedules<DS extends BaseDataSource = BaseDataSource>(
   dataSources: DS[],
-  getBlockTimestamp: (height: number) => Promise<Date>,
-  isRuntimeDs: IsRuntimeDs,
+  getBlockTimestamp: (height: number) => Promise<Date | undefined>,
+  isRuntimeDs: IsRuntimeDs<DS>,
   blockHandlerKind: string
 ): Promise<DS[]> {
   dataSources = await Promise.all(
@@ -251,8 +247,16 @@ export async function insertBlockFiltersCronSchedules<DS extends BaseDataSource 
             if (handler.kind === blockHandlerKind) {
               if (handler.filter?.timestamp) {
                 if (!timestampReference) {
-                  timestampReference = await getBlockTimestamp(startBlock);
+                  const blockTimestamp = await getBlockTimestamp(startBlock);
+                  if (!blockTimestamp) {
+                    throw new Error(
+                      `Could not apply cronSchedule, failed to get block timestamp for block ${startBlock}`
+                    );
+                  } else {
+                    timestampReference = blockTimestamp;
+                  }
                 }
+
                 let cronArr: number[][];
                 try {
                   cronArr = stringToArray(handler.filter.timestamp);
@@ -260,13 +264,13 @@ export async function insertBlockFiltersCronSchedules<DS extends BaseDataSource 
                   throw new Error(`Invalid Cron string: ${handler.filter.timestamp}`);
                 }
 
-                const schedule = getSchedule(cronArr, timestampReference);
+                const schedule = getSchedule(cronArr, timestampReference, 'utc');
                 handler.filter.cronSchedule = {
                   schedule: schedule,
                   get next() {
-                    return Date.parse(this.schedule.next().format());
+                    return (this.schedule as Schedule).next().toMillis();
                   },
-                };
+                } satisfies CronFilter['cronSchedule'];
               }
             }
             return handler;
@@ -280,20 +284,23 @@ export async function insertBlockFiltersCronSchedules<DS extends BaseDataSource 
   return dataSources;
 }
 
-export async function loadProjectTemplates<T extends BaseDataSource & TemplateBase>(
+export async function loadProjectTemplates<T extends BaseTemplateDataSource>(
   templates: T[] | undefined,
   root: string,
   reader: Reader,
-  isCustomDs: IsCustomDs<BaseDataSource, BaseCustomDataSource>
+  isCustomDs: IsCustomDs<T, T & BaseCustomDataSource>
 ): Promise<T[]> {
   if (!templates || !templates.length) {
     return [];
   }
-  const dsTemplates = await updateDataSourcesV1_0_0(templates, reader, root, isCustomDs);
+
+  const templateIsCustomDs = (template: T): template is T & BaseCustomDataSource =>
+    isCustomDs(template) && 'name' in template;
+  const dsTemplates = await updateDataSourcesV1_0_0(templates, reader, root, templateIsCustomDs);
   return dsTemplates.map((ds, index) => ({
     ...ds,
     name: templates[index].name,
-  })) as T[]; // How to get rid of cast here?
+  }));
 }
 
 export function getStartHeight(dataSources: BaseDataSource[]): number {

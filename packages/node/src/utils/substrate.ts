@@ -1,6 +1,7 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import { ApiPromise } from '@polkadot/api';
 import { Vec } from '@polkadot/types';
 import '@polkadot/api-augment/substrate';
@@ -32,6 +33,7 @@ import { merge, range } from 'lodash';
 import { SubqlProjectBlockFilter } from '../configure/SubqueryProject';
 import { ApiPromiseConnection } from '../indexer/apiPromise.connection';
 import { BlockContent, LightBlockContent } from '../indexer/types';
+
 const logger = getLogger('fetch');
 const INTERVAL_THRESHOLD = BN_THOUSAND.div(BN_TWO);
 const DEFAULT_TIME = new BN(6_000);
@@ -48,7 +50,7 @@ export function substrateHeaderToHeader(header: SubstrateHeader): Header {
 export function wrapBlock(
   signedBlock: SignedBlock,
   events: EventRecord[],
-  specVersion?: number,
+  specVersion: number,
 ): SubstrateBlock {
   return merge(signedBlock, {
     timestamp: getTimestamp(signedBlock),
@@ -57,7 +59,9 @@ export function wrapBlock(
   });
 }
 
-export function getTimestamp({ block: { extrinsics } }: SignedBlock): Date {
+export function getTimestamp({
+  block: { extrinsics },
+}: SignedBlock): Date | undefined {
   for (const e of extrinsics) {
     const {
       method: { method, section },
@@ -70,6 +74,9 @@ export function getTimestamp({ block: { extrinsics } }: SignedBlock): Date {
       return date;
     }
   }
+  // For network that doesn't use timestamp-set, return undefined
+  // See test `return undefined if no timestamp set extrinsic`
+  return undefined;
 }
 
 export function wrapExtrinsics(
@@ -140,6 +147,7 @@ export function filterBlock(
   if (!filter) return block;
   if (!filterBlockModulo(block, filter)) return;
   if (
+    block.timestamp &&
     !filterBlockTimestamp(
       block.timestamp.getTime(),
       filter as SubqlProjectBlockFilter,
@@ -375,12 +383,13 @@ export async function fetchBlocksBatches(
       ? undefined
       : fetchRuntimeVersionRange(api, parentBlockHashs),
   ]);
+
   return blocks.map((block, idx) => {
     const events = blockEvents[idx];
     const parentSpecVersion =
-      overallSpecVer !== undefined
-        ? overallSpecVer
-        : runtimeVersions[idx].specVersion.toNumber();
+      overallSpecVer ?? runtimeVersions?.[idx].specVersion.toNumber();
+    assert(parentSpecVersion !== undefined, 'parentSpecVersion is undefined');
+
     const wrappedBlock = wrapBlock(block, events.toArray(), parentSpecVersion);
     const wrappedExtrinsics = wrapExtrinsics(wrappedBlock, events);
     const wrappedEvents = wrapEvents(wrappedExtrinsics, events, wrappedBlock);
@@ -450,8 +459,8 @@ export function calcInterval(api: ApiPromise): BN {
       (api.consts.timestamp?.minimumPeriod.gte(INTERVAL_THRESHOLD)
         ? api.consts.timestamp.minimumPeriod.mul(BN_TWO)
         : api.query.parachainSystem
-        ? DEFAULT_TIME.mul(BN_TWO)
-        : DEFAULT_TIME),
+          ? DEFAULT_TIME.mul(BN_TWO)
+          : DEFAULT_TIME),
   );
 }
 

@@ -1,7 +1,6 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-export * from './benchmark.service';
 export * from './connectionPool.service';
 export * from './connectionPoolState.manager';
 export * from './entities';
@@ -24,3 +23,5 @@ export * from './fetch.service';
 export * from './indexer.manager';
 export * from './ds-processor.service';
 export * from './unfinalizedBlocks.service';
+export * from './monitor.service';
+export * from './core.module';

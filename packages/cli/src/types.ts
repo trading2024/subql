@@ -61,16 +61,17 @@ export interface ValidateDataType {
   errorMessage?: string;
 }
 
-export interface DeploymentSpec {
-  org: string;
-  projectName: string;
-  repository: string;
-  ipfs: string;
-  subtitle: string;
-  description: string;
-  logoURl: string;
-  apiVersion: string;
-  type: string;
+export interface CreateProject {
+  key: string;
+  name: string;
+  subtitle?: string;
+  description?: string;
+  logoUrl?: string;
+  apiVersion: 'v2' | 'v3';
+  type: 1 | 2 | 3; // MS | NETWORK | SUBGRAPH
+  tag: string[];
+  hide?: boolean;
+  dedicateDBKey?: string;
 }
 export interface DeploymentDataType {
   projectKey: string;
@@ -113,8 +114,8 @@ export interface ProjectDataType {
   queryUrl: string;
   configuration: {
     config: {
-      query: {};
-      indexer: {};
+      query: unknown;
+      indexer: unknown;
     };
   };
   role: string;
@@ -122,9 +123,11 @@ export interface ProjectDataType {
   apiVersion: string;
 }
 
+export type DeploymentType = 'primary' | 'stage';
+
 export interface V3DeploymentInput {
   cid: string;
-  type: 'primary' | 'stage';
+  type: DeploymentType;
   queryImageVersion: string;
   queryAdvancedSettings: {
     query: QueryAdvancedOpts;
@@ -134,7 +137,7 @@ export interface V3DeploymentInput {
 
 export interface V3DeploymentIndexerType {
   cid: string;
-  dictEndpoint: string;
+  dictEndpoint?: string;
   endpoint: string | string[];
   indexerImageVersion: string;
   indexerAdvancedSettings: {
@@ -155,7 +158,7 @@ export interface ProjectDeploymentInterface {
   org: string;
   projectName: string;
   chains: V3DeploymentIndexerType[];
-  projectInfo: ProjectDataType;
+  projectInfo?: ProjectDataType;
   flags: DeploymentFlagsInterface;
   ipfsCID: string;
   queryVersion: string;
@@ -165,27 +168,27 @@ export interface ProjectDeploymentInterface {
 
 export interface DeploymentFlagsInterface {
   ipfs?: string;
-  org: string;
-  projectName: string;
-  type: string;
-  indexerVersion: string;
-  queryVersion: string;
-  dict: string;
-  endpoint: string;
+  org?: string;
+  projectName?: string;
+  type: DeploymentType;
+  indexerVersion?: string;
+  queryVersion?: string;
+  dict?: string;
+  endpoint?: string;
   indexerUnsafe: boolean;
-  indexerBatchSize: number;
+  indexerBatchSize?: number;
   indexerSubscription: boolean;
   disableHistorical: boolean;
   indexerUnfinalized: boolean;
-  indexerStoreCacheThreshold: number;
+  indexerStoreCacheThreshold?: number;
   disableIndexerStoreCacheAsync: boolean;
   indexerWorkers?: number;
   ipfsCID?: string;
   location?: string;
   queryUnsafe: boolean;
   querySubscription: boolean;
-  queryTimeout: number;
-  queryMaxConnection: number;
+  queryTimeout?: number;
+  queryMaxConnection?: number;
   queryAggregate: boolean;
   queryLimit?: number;
   useDefaults: boolean;
@@ -193,7 +196,7 @@ export interface DeploymentFlagsInterface {
 
 export interface GenerateDeploymentChainInterface {
   cid: string;
-  dictEndpoint: string;
+  dictEndpoint?: string;
   endpoint: string[];
   indexerImageVersion: string;
   flags: DeploymentFlagsInterface;

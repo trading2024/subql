@@ -10,15 +10,8 @@ import {IApi} from '../api.service';
 import {IProjectUpgradeService, NodeConfig} from '../configure';
 import {IndexerEvent} from '../events';
 import {getLogger} from '../logger';
-import {
-  getExistingProjectSchema,
-  getStartHeight,
-  hasValue,
-  initDbSchema,
-  initHotSchemaReload,
-  mainThreadOnly,
-  reindex,
-} from '../utils';
+import {exitWithError, monitorWrite} from '../process';
+import {getExistingProjectSchema, getStartHeight, hasValue, initDbSchema, mainThreadOnly, reindex} from '../utils';
 import {BlockHeightMap} from '../utils/blockHeightMap';
 import {BaseDsProcessorService} from './ds-processor.service';
 import {DynamicDsService} from './dynamic-ds.service';
@@ -26,7 +19,7 @@ import {MetadataKeys} from './entities';
 import {PoiSyncService} from './poi';
 import {PoiService} from './poi/poi.service';
 import {StoreService} from './store.service';
-import {ISubqueryProject, IProjectService} from './types';
+import {ISubqueryProject, IProjectService, BypassBlocks} from './types';
 import {IUnfinalizedBlocksService} from './unfinalizedBlocks.service';
 
 const logger = getLogger('Project');
@@ -48,7 +41,7 @@ export abstract class BaseProjectService<
   private _blockOffset?: number;
 
   protected abstract packageVersion: string;
-  protected abstract getBlockTimestamp(height: number): Promise<Date>;
+  protected abstract getBlockTimestamp(height: number): Promise<Date | undefined>;
   protected abstract onProjectChange(project: ISubqueryProject<IProjectNetworkConfig, DS>): void | Promise<void>;
 
   constructor(
@@ -90,15 +83,21 @@ export abstract class BaseProjectService<
     return this._blockOffset;
   }
 
+  get bypassBlocks(): BypassBlocks {
+    return this.project.network.bypassBlocks ?? [];
+  }
+
   protected get isHistorical(): boolean {
     return this.storeService.historical;
   }
 
-  private async getExistingProjectSchema(): Promise<string | undefined> {
+  protected async getExistingProjectSchema(): Promise<string | undefined> {
     return getExistingProjectSchema(this.nodeConfig, this.sequelize);
   }
 
   async init(startHeight?: number): Promise<void> {
+    this.ensureTimezone();
+
     for await (const [, project] of this.projectUpgradeService.projects) {
       await project.applyCronTimestamps(this.getBlockTimestamp.bind(this));
     }
@@ -128,7 +127,6 @@ export abstract class BaseProjectService<
 
       // These need to be init before upgrade and unfinalized services because they may cause rewinds.
       await this.initDbSchema();
-      await this.initHotSchemaReload();
 
       if (this.nodeConfig.proofOfIndex) {
         // Prepare for poi migration and creation
@@ -138,14 +136,13 @@ export abstract class BaseProjectService<
         void this.poiSyncService.syncPoi(undefined);
       }
 
+      const reindexedUpgrade = await this.initUpgradeService(this.startHeight);
       // Unfinalized is dependent on POI in some cases, it needs to be init after POI is init
       const reindexedUnfinalized = await this.initUnfinalizedInternal();
 
       if (reindexedUnfinalized !== undefined) {
         this._startHeight = reindexedUnfinalized;
       }
-
-      const reindexedUpgrade = await this.initUpgradeService(this.startHeight);
 
       if (reindexedUpgrade !== undefined) {
         this._startHeight = reindexedUpgrade;
@@ -163,6 +160,15 @@ export abstract class BaseProjectService<
 
     // Used to load assets into DS-processor, has to be done in any thread
     await this.dsProcessorService.validateProjectCustomDatasources(await this.getDataSources());
+  }
+
+  private ensureTimezone(): void {
+    const timezone = process.env.TZ;
+    if (!timezone || timezone.toLowerCase() !== 'utc') {
+      throw new Error(
+        'Environment Timezone is not set to UTC. This may cause issues with indexing or proof of index\n Please try to set with "export TZ=UTC"'
+      );
+    }
   }
 
   private async ensureProject(): Promise<string> {
@@ -187,12 +193,8 @@ export abstract class BaseProjectService<
     return schema;
   }
 
-  private async initHotSchemaReload(): Promise<void> {
-    await initHotSchemaReload(this.schema, this.storeService);
-  }
-
   private async initDbSchema(): Promise<void> {
-    await initDbSchema(this.project, this.schema, this.storeService);
+    await initDbSchema(this.schema, this.storeService);
   }
 
   private async ensureMetadata(): Promise<void> {
@@ -282,12 +284,12 @@ export abstract class BaseProjectService<
     return undefined;
   }
 
+  // @ts-ignore
   getStartBlockFromDataSources(): number {
     try {
       return getStartHeight(this.project.dataSources);
     } catch (e: any) {
-      logger.error(e);
-      process.exit(1);
+      exitWithError(e, logger);
     }
   }
 
@@ -376,10 +378,10 @@ export abstract class BaseProjectService<
 
   private async initUnfinalizedInternal(): Promise<number | undefined> {
     if (this.nodeConfig.unfinalizedBlocks && !this.isHistorical) {
-      logger.error(
-        'Unfinalized blocks cannot be enabled without historical. You will need to reindex your project to enable historical'
+      exitWithError(
+        'Unfinalized blocks cannot be enabled without historical. You will need to reindex your project to enable historical',
+        logger
       );
-      process.exit(1);
     }
 
     return this.initUnfinalized();
@@ -418,16 +420,16 @@ export abstract class BaseProjectService<
       } else {
         if (lastProcessedHeight && upgradePoint < lastProcessedHeight) {
           if (!this.isHistorical) {
-            logger.error(
+            exitWithError(
               `Unable to upgrade project. Cannot rewind to block ${upgradePoint} without historical indexing enabled.`
             );
-            process.exit(1);
           }
           if (!this.projectUpgradeService.isRewindable) {
-            logger.error(`Due to dropped changes in schema migration, project cannot rewind`);
-            process.exit(1);
+            exitWithError(`Due to dropped changes in schema migration, project cannot rewind`, logger);
           }
-          logger.info(`Rewinding project to preform project upgrade. Block height="${upgradePoint}"`);
+          const msg = `Rewinding project to preform project upgrade. Block height="${upgradePoint}"`;
+          logger.info(msg);
+          monitorWrite(msg);
           await this.reindex(upgradePoint);
           return upgradePoint + 1;
         }

@@ -2,21 +2,22 @@
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'assert';
-import util from 'util';
 import {OnApplicationShutdown} from '@nestjs/common';
 import {EventEmitter2} from '@nestjs/event-emitter';
 import {SchedulerRegistry} from '@nestjs/schedule';
-import {BaseDataSource, IProjectNetworkConfig} from '@subql/types-core';
-import {range, without} from 'lodash';
+import {BaseDataSource} from '@subql/types-core';
+import {range} from 'lodash';
 import {NodeConfig} from '../configure';
 import {IndexerEvent} from '../events';
 import {getLogger} from '../logger';
-import {cleanedBatchBlocks, delay, transformBypassBlocks, waitForBatchSize} from '../utils';
+import {delay, filterBypassBlocks, waitForBatchSize} from '../utils';
 import {IBlockDispatcher} from './blockDispatcher';
 import {mergeNumAndBlocksToNums} from './dictionary';
 import {DictionaryService} from './dictionary/dictionary.service';
-import {getBlockHeight, mergeNumAndBlocks} from './dictionary/utils';
-import {IBlock, IProjectService} from './types';
+import {mergeNumAndBlocks} from './dictionary/utils';
+import {StoreCacheService} from './storeCache';
+import {BypassBlocks, Header, IBlock, IProjectService} from './types';
+import {IUnfinalizedBlocksServiceUtil} from './unfinalizedBlocks.service';
 
 const logger = getLogger('FetchService');
 
@@ -26,10 +27,9 @@ export abstract class BaseFetchService<DS extends BaseDataSource, B extends IBlo
   private _latestBestHeight?: number;
   private _latestFinalizedHeight?: number;
   private isShutdown = false;
-  private bypassBlocks: number[] = [];
 
   // If the chain doesn't have a distinction between the 2 it should return the same value for finalized and best
-  protected abstract getFinalizedHeight(): Promise<number>;
+  protected abstract getFinalizedHeader(): Promise<Header>;
   protected abstract getBestHeight(): Promise<number>;
 
   // The rough interval at which new blocks are produced
@@ -46,11 +46,12 @@ export abstract class BaseFetchService<DS extends BaseDataSource, B extends IBlo
   constructor(
     private nodeConfig: NodeConfig,
     protected projectService: IProjectService<DS>,
-    protected networkConfig: IProjectNetworkConfig,
     protected blockDispatcher: B,
     protected dictionaryService: DictionaryService<DS, FB>,
     private eventEmitter: EventEmitter2,
-    private schedulerRegistry: SchedulerRegistry
+    private schedulerRegistry: SchedulerRegistry,
+    private unfinalizedBlocksService: IUnfinalizedBlocksServiceUtil,
+    private storeCacheService: StoreCacheService
   ) {}
 
   private get latestBestHeight(): number {
@@ -73,39 +74,25 @@ export abstract class BaseFetchService<DS extends BaseDataSource, B extends IBlo
     this.isShutdown = true;
   }
 
-  private updateBypassBlocksFromDatasources(): void {
-    const datasources = this.projectService.getDataSourcesMap().getAll();
-
-    const heights = Array.from(datasources.keys());
-
-    for (let i = 0; i < heights.length - 1; i++) {
-      const currentHeight = heights[i];
-      const nextHeight = heights[i + 1];
-
-      const currentDS = datasources.get(currentHeight);
-      // If the value for the current height is an empty array, then it's a gap
-      if (currentDS && currentDS.length === 0) {
-        this.bypassBlocks.push(...range(currentHeight, nextHeight));
-      }
-    }
-  }
-
   async init(startHeight: number): Promise<void> {
-    this.bypassBlocks = [];
-
-    if (this.networkConfig?.bypassBlocks !== undefined) {
-      this.bypassBlocks = transformBypassBlocks(this.networkConfig.bypassBlocks).filter((blk) => blk >= startHeight);
-    }
-
-    this.updateBypassBlocksFromDatasources();
     const interval = await this.getChainInterval();
 
     await Promise.all([this.getFinalizedBlockHead(), this.getBestBlockHead()]);
 
-    if (startHeight > this.latestHeight()) {
-      throw new Error(
-        `The startBlock of dataSources in your project manifest (${startHeight}) is higher than the current chain height (${this.latestHeight()}). Please adjust your startBlock to be less that the current chain height.`
-      );
+    const chainLatestHeight = this.latestHeight();
+    if (startHeight > chainLatestHeight) {
+      // This is at init stage, lastProcessedHeight should be always - 1 from the startHeight in this case
+      // this is reverse calculated from projectService.nextProcessHeight()
+      // Alternative, we can expose async function getLastProcessedHeight() to ensure accuracy.
+      if (startHeight - 1 === chainLatestHeight) {
+        logger.warn(
+          `Project last processed height is same as current chain height (${chainLatestHeight}). Please ensure the RPC endpoint provider is behaving correctly.`
+        );
+      } else {
+        throw new Error(
+          `The startBlock of dataSources in your project manifest (${startHeight}) is higher than the current chain height (${chainLatestHeight}). Please adjust your startBlock to be less that the current chain height.`
+        );
+      }
     }
 
     this.schedulerRegistry.addInterval(
@@ -134,9 +121,15 @@ export abstract class BaseFetchService<DS extends BaseDataSource, B extends IBlo
 
   async getFinalizedBlockHead(): Promise<void> {
     try {
-      const currentFinalizedHeight = await this.getFinalizedHeight();
-      if (this._latestFinalizedHeight !== currentFinalizedHeight) {
-        this._latestFinalizedHeight = currentFinalizedHeight;
+      const currentFinalizedHeader = await this.getFinalizedHeader();
+      // Rpc could return finalized height below last finalized height due to unmatched nodes, and this could lead indexing stall
+      // See how this could happen in https://gist.github.com/jiqiang90/ea640b07d298bca7cbeed4aee50776de
+      if (
+        this._latestFinalizedHeight === undefined ||
+        currentFinalizedHeader.blockHeight > this._latestFinalizedHeight
+      ) {
+        this._latestFinalizedHeight = currentFinalizedHeader.blockHeight;
+        this.unfinalizedBlocksService.registerFinalizedBlock(currentFinalizedHeader);
         if (!this.nodeConfig.unfinalizedBlocks) {
           this.eventEmitter.emit(IndexerEvent.BlockTarget, {
             height: this.latestFinalizedHeight,
@@ -200,11 +193,27 @@ export abstract class BaseFetchService<DS extends BaseDataSource, B extends IBlo
       const latestHeight = this.latestHeight();
 
       if (this.blockDispatcher.freeSize < scaledBatchSize || startBlockHeight > latestHeight) {
+        if (this.blockDispatcher.freeSize < scaledBatchSize) {
+          logger.debug(
+            `Fetch service is waiting for free space in the block dispatcher queue, free size: ${this.blockDispatcher.freeSize}, scaledBatchSize: ${scaledBatchSize}`
+          );
+        }
+        if (startBlockHeight > latestHeight) {
+          logger.debug(
+            `Fetch service is waiting for new blocks, startBlockHeight: ${startBlockHeight}, latestHeight: ${latestHeight}`
+          );
+        }
         await delay(1);
         continue;
       }
 
-      if (startBlockHeight < this.latestFinalizedHeight) {
+      // Update the target height, this happens here to stay in sync with the rest of indexing
+      this.storeCacheService.metadata.set('targetHeight', latestHeight);
+
+      // This could be latestBestHeight, dictionary should never include finalized blocks
+      // TODO add buffer so dictionary not used when project synced
+      if (startBlockHeight < this.latestBestHeight - scaledBatchSize) {
+        // if (startBlockHeight < this.latestFinalizedHeight) {
         try {
           const dictionary = await this.dictionaryService.scopedDictionaryEntries(
             startBlockHeight,
@@ -308,49 +317,52 @@ export abstract class BaseFetchService<DS extends BaseDataSource, B extends IBlo
   }
 
   private async enqueueBlocks(enqueuingBlocks: (IBlock<FB> | number)[], latestHeight: number): Promise<void> {
-    const cleanedBatchBlocks = this.filteredBlockBatch(enqueuingBlocks);
+    const cleanedBatchBlocks = filterBypassBlocks<FB>(enqueuingBlocks, [
+      ...this.projectService.bypassBlocks,
+      ...this.getDatasourceBypassBlocks(),
+    ]);
     await this.blockDispatcher.enqueueBlocks(
       cleanedBatchBlocks,
-      this.getLatestBufferHeight(cleanedBatchBlocks, enqueuingBlocks, latestHeight)
+      this.getLatestBufferHeight(enqueuingBlocks, latestHeight)
     );
   }
 
   /**
    *
-   * @param cleanedBatchBlocks
    * @param rawBatchBlocks
    * @param latestHeight
    * @private
    */
-  private getLatestBufferHeight(
-    cleanedBatchBlocks: (IBlock<FB> | number)[],
-    rawBatchBlocks: (IBlock<FB> | number)[],
-    latestHeight: number
-  ): number {
+  private getLatestBufferHeight(rawBatchBlocks: (IBlock<FB> | number)[], latestHeight: number): number {
     // When both BatchBlocks are empty, mean no blocks to enqueue and full synced,
     // we are safe to update latestBufferHeight to this number
-    if (cleanedBatchBlocks.length === 0 && rawBatchBlocks.length === 0) {
+    if (rawBatchBlocks.length === 0) {
       return latestHeight;
     }
-    return Math.max(...mergeNumAndBlocksToNums(cleanedBatchBlocks, rawBatchBlocks));
+    return Math.max(...mergeNumAndBlocksToNums([], rawBatchBlocks));
   }
 
-  private filteredBlockBatch(currentBatchBlocks: (number | IBlock<FB>)[]): (number | IBlock<FB>)[] {
-    if (!this.bypassBlocks.length || !currentBatchBlocks) {
-      return currentBatchBlocks;
-    }
+  /**
+   * If a projects datasources are not continuious we can add add them to the bypass blocks
+   * */
+  private getDatasourceBypassBlocks(): BypassBlocks {
+    const datasources = this.projectService.getDataSourcesMap().getAll();
 
-    const cleanedBatch = cleanedBatchBlocks(this.bypassBlocks, currentBatchBlocks);
+    const heights = Array.from(datasources.keys());
 
-    const pollutedBlocks = this.bypassBlocks.filter(
-      (b) => b < Math.max(...currentBatchBlocks.map((b) => getBlockHeight(b)))
-    );
-    if (pollutedBlocks.length) {
-      // inspect limits the number of logged blocks to 100
-      logger.info(`Bypassing blocks: ${util.inspect(pollutedBlocks, {maxArrayLength: 100})}`);
+    const bypassBlocks: BypassBlocks = [];
+
+    for (let i = 0; i < heights.length - 1; i++) {
+      const currentHeight = heights[i];
+      const nextHeight = heights[i + 1];
+
+      const currentDS = datasources.get(currentHeight);
+      // If the value for the current height is an empty array, then it's a gap
+      if (currentDS?.length === 0) {
+        bypassBlocks.push(`${currentHeight}-${nextHeight - 1}`);
+      }
     }
-    this.bypassBlocks = without(this.bypassBlocks, ...pollutedBlocks);
-    return cleanedBatch;
+    return bypassBlocks;
   }
 
   private nextEndBlockHeight(startBlockHeight: number, scaledBatchSize: number): number {

@@ -12,6 +12,7 @@ import {
   NodeConfig,
 } from '@subql/node-core';
 import { SubstrateBlock } from '@subql/types';
+import { IEndpointConfig } from '@subql/types-core';
 import { GraphQLSchema } from 'graphql';
 import { SubqueryProject } from '../configure/SubqueryProject';
 import { wrapBlock } from '../utils/substrate';
@@ -24,26 +25,26 @@ const TEST_BLOCKHASH =
   '0x70070f6c1ad5b9ce3d0a09e94086e22b8d4f08a18491183de96614706bf59600'; // kusama #6721189
 
 function testSubqueryProject(
-  endpoint: string[],
+  endpoint: Record<string, IEndpointConfig>,
   chainId: string,
 ): SubqueryProject {
-  return new SubqueryProject(
-    'test',
-    './',
-    {
+  return {
+    id: 'test',
+    root: './',
+    network: {
       endpoint,
       dictionary: `https://api.subquery.network/sq/subquery/dictionary-polkadot`,
       chainId: chainId,
     },
-    [],
-    new GraphQLSchema({}),
-    [],
-    {
+    dataSources: [],
+    schema: new GraphQLSchema({}),
+    templates: [],
+    chainTypes: {
       types: {
         TestType: 'u32',
       },
     },
-  );
+  } as unknown as SubqueryProject;
 }
 
 jest.setTimeout(90000);
@@ -64,7 +65,7 @@ describe('ApiService', () => {
         ConnectionPoolService,
         {
           provide: 'ISubqueryProject',
-          useFactory: () => testSubqueryProject([endpoint], chainId),
+          useFactory: () => testSubqueryProject({ [endpoint]: {} }, chainId),
         },
         {
           provide: NodeConfig,
@@ -101,7 +102,7 @@ describe('ApiService', () => {
     const blockhash = await api.rpc.chain.getBlockHash(2);
     const validators = await api.query.session.validators.at(blockhash);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 1) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 1 } as unknown as RuntimeVersion;
     const patchedApi = await apiService.getPatchedApi(
       mockBlock.block.header,
@@ -120,7 +121,7 @@ describe('ApiService', () => {
     const api = apiService.api;
     const blockhash = await api.rpc.chain.getBlockHash(6721189);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 13) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 13 } as unknown as RuntimeVersion;
     const patchedApi = await apiService.getPatchedApi(
       mockBlock.block.header,
@@ -147,7 +148,7 @@ describe('ApiService', () => {
     const api = apiService.api;
     const blockhash = await api.rpc.chain.getBlockHash(6721195);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 9090) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 9090 } as unknown as RuntimeVersion;
     // step 1, get early block, original polkadot api query result
     const earlyBlockhash = await api.rpc.chain.getBlockHash(5661443);
@@ -157,9 +158,8 @@ describe('ApiService', () => {
       mockBlock.block.header,
       runtimeVersion,
     );
-    const patchedResult = await patchedApi.rpc.state.getRuntimeVersion(
-      earlyBlockhash,
-    );
+    const patchedResult =
+      await patchedApi.rpc.state.getRuntimeVersion(earlyBlockhash);
     expect(apiResults).toEqual(patchedResult);
     // patchedApi without input blockHash, will return runtimeVersion at 6721195
     const patchedResult2 = await patchedApi.rpc.state.getRuntimeVersion();
@@ -177,7 +177,7 @@ describe('ApiService', () => {
     const api = apiService.api;
     const blockhash = await api.rpc.chain.getBlockHash(5661443);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 9050) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 9050 } as unknown as RuntimeVersion;
     // step 1, get future block, original polkadot api query result
     const futureBlockhash = await api.rpc.chain.getBlockHash(6721195);
@@ -209,7 +209,7 @@ describe('ApiService', () => {
     }
 
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 28) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 28 } as unknown as RuntimeVersion;
     const patchedApi = await apiService.getPatchedApi(
       mockBlock.block.header,
@@ -383,7 +383,7 @@ describe('ApiService', () => {
     const api = apiService.api;
     const blockhash = await api.rpc.chain.getBlockHash(1);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 1) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 1 } as unknown as RuntimeVersion;
 
     const patchedApi = await apiService.getPatchedApi(
@@ -404,7 +404,7 @@ describe('ApiService', () => {
     const blockNumber = 1545235;
     const blockhash = await api.rpc.chain.getBlockHash(blockNumber);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 1103) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 1103 } as unknown as RuntimeVersion;
 
     const patchedApi = await apiService.getPatchedApi(
@@ -444,7 +444,7 @@ describe('Load chain type hasher', () => {
   });
 
   const prepareApiService = async (
-    endpoint = ['wss://hyperbridge-paseo-rpc.blockops.network'],
+    endpoint = { 'wss://hyperbridge-paseo-rpc.blockops.network': {} },
     chainId = '0x5388faf792c5232566d21493929b32c1f20a9c2b03e95615eefec2aa26d64b73',
   ): Promise<ApiService> => {
     const module = await Test.createTestingModule({
@@ -453,29 +453,28 @@ describe('Load chain type hasher', () => {
         ConnectionPoolService,
         {
           provide: 'ISubqueryProject',
-          useFactory: () =>
-            new SubqueryProject(
-              'test',
-              './',
-              {
-                endpoint,
-                chainId: chainId,
-              },
-              [],
-              new GraphQLSchema({}),
-              [],
-              {
-                typesBundle: {
-                  spec: {
-                    gargantua: {
-                      // @ts-ignore, we allow it to be string here
-                      hasher: 'keccakAsU8a',
-                      types: [{ minmax: [0, undefined], types: {} }],
-                    },
+          useFactory: () => ({
+            id: 'test',
+            root: './',
+            network: {
+              endpoint,
+              chainId: chainId,
+            },
+            dataSources: [],
+            schema: new GraphQLSchema({}),
+            templates: [],
+            chainTypes: {
+              typesBundle: {
+                spec: {
+                  gargantua: {
+                    // @ts-ignore, we allow it to be string here
+                    hasher: 'keccakAsU8a',
+                    types: [{ minmax: [0, undefined], types: {} }],
                   },
                 },
               },
-            ),
+            },
+          }),
         },
         {
           provide: NodeConfig,

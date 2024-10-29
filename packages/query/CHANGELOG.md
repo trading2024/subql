@@ -6,6 +6,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.2] - 2024-09-25
+### Changed
+- Bump common, Added manifest support for query-subgraph.
+
+## [2.15.1] - 2024-08-23
+### Fixed
+- Missing rxjs dependency
+
+## [2.15.0] - 2024-08-23
+### Added
+- Support for null ordering (#2526)
+
+## [2.14.1] - 2024-08-12
+### Fixed
+- Revert yargs version
+
+### Changed
+- Update how idle psql pool connections are handled (#2520)
+
+## [2.14.0] - 2024-08-05
+### Changed
+- Update dependencies (#2518)
+
+### Added
+- add support for null ordering in 'order by' query (#2387)
+
+## [2.13.3] - 2024-07-25
+### Changed
+- Bump version with `@subql/common` and `@subql/utils` (#2498)
+
+## [2.13.2] - 2024-07-09
+### Changed
+- Enable TS strict setting
+
+## [2.13.1] - 2024-06-26
+### Fixed
+- Fixed the aggregate query, type conversion causes precision loss.
+
+## [2.13.0] - 2024-06-21
+### Fixed
+- Fixed query service unable to query dynamic datasource due to change from #2302
+
+### Added
+- enable ts strict mode
+
+## [2.12.1] - 2024-06-12
+### Changed
+- Update `@subql/utils`
+
+## [2.12.0] - 2024-06-12
+### Added
+- Add query `dbSize` under metadata (#2430)
+
 ## [2.11.1] - 2024-05-09
 ### Fixed
 - Certain historical queries not appliying block height (#2398)
@@ -311,7 +364,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - overwrite plugin to fix one to one unique key check
 - update query publish and docker build process
 
-[Unreleased]: https://github.com/subquery/subql/compare/query/2.11.1...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/query/2.15.2...HEAD
+[2.15.2]: https://github.com/subquery/subql/compare/query/2.15.1...query/2.15.2
+[2.15.1]: https://github.com/subquery/subql/compare/query/2.15.0...query/2.15.1
+[2.15.0]: https://github.com/subquery/subql/compare/query/2.14.1...query/2.15.0
+[2.14.1]: https://github.com/subquery/subql/compare/query/2.14.0...query/2.14.1
+[2.14.0]: https://github.com/subquery/subql/compare/query/2.13.3...query/2.14.0
+[2.13.3]: https://github.com/subquery/subql/compare/query/2.13.2...query/2.13.3
+[2.13.2]: https://github.com/subquery/subql/compare/query/2.13.1...query/2.13.2
+[2.13.1]: https://github.com/subquery/subql/compare/query/2.13.0...query/2.13.1
+[2.13.0]: https://github.com/subquery/subql/compare/query/2.12.1...query/2.13.0
+[2.12.1]: https://github.com/subquery/subql/compare/query/2.12.0...query/2.12.1
+[2.12.0]: https://github.com/subquery/subql/compare/query/2.11.1...query/2.12.0
 [2.11.1]: https://github.com/subquery/subql/compare/query/2.11.0...query/2.11.1
 [2.11.0]: https://github.com/subquery/subql/compare/query/2.10.5...query/2.11.0
 [2.10.5]: https://github.com/subquery/subql/compare/query/2.10.4...query/2.10.5

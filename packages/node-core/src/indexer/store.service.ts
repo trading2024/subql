@@ -14,17 +14,19 @@ import {
   GraphQLModelsType,
 } from '@subql/utils';
 import {IndexesOptions, ModelAttributes, ModelStatic, Op, QueryTypes, Sequelize, Transaction} from '@subql/x-sequelize';
-import {camelCase, flatten, upperFirst} from 'lodash';
+import {camelCase, flatten, last, upperFirst} from 'lodash';
 import {NodeConfig} from '../configure';
 import {
   BTREE_GIST_EXTENSION_EXIST_QUERY,
   createSchemaTrigger,
   createSchemaTriggerFunction,
+  getDbSizeAndUpdateMetadata,
   getTriggers,
   SchemaMigrationService,
 } from '../db';
 import {getLogger} from '../logger';
-import {camelCaseObjectKey} from '../utils';
+import {exitWithError} from '../process';
+import {camelCaseObjectKey, customCamelCaseGraphqlKey} from '../utils';
 import {MetadataFactory, MetadataRepo, PoiFactory, PoiFactoryDeprecate, PoiRepo} from './entities';
 import {Store} from './store';
 import {CacheMetadataModel} from './storeCache';
@@ -34,6 +36,7 @@ import {ISubqueryProject} from './types';
 
 const logger = getLogger('StoreService');
 const NULL_MERKEL_ROOT = hexToU8a('0x00');
+const DB_SIZE_CACHE_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 
 interface IndexField {
   entityName: string;
@@ -57,10 +60,11 @@ export class StoreService {
   private _historical?: boolean;
   private _dbType?: SUPPORT_DB;
   private _metadataModel?: CacheMetadataModel;
-
+  private _schema?: string;
   // Should be updated each block
   private _blockHeight?: number;
   private _operationStack?: StoreOperations;
+  private _lastTimeDbSizeChecked?: number;
 
   constructor(
     private sequelize: Sequelize,
@@ -102,6 +106,22 @@ export class StoreService {
     return this._historical;
   }
 
+  async syncDbSize(): Promise<bigint> {
+    if (!this._lastTimeDbSizeChecked || Date.now() - this._lastTimeDbSizeChecked > DB_SIZE_CACHE_TIMEOUT) {
+      this._lastTimeDbSizeChecked = Date.now();
+      return getDbSizeAndUpdateMetadata(this.sequelize, this.schema);
+    } else {
+      return this.storeCache.metadata.find('dbSize').then((cachedDbSize) => {
+        if (cachedDbSize !== undefined) {
+          return cachedDbSize;
+        } else {
+          this._lastTimeDbSizeChecked = Date.now();
+          return getDbSizeAndUpdateMetadata(this.sequelize, this.schema);
+        }
+      });
+    }
+  }
+
   private get dbType(): SUPPORT_DB {
     assert(this._dbType, new NoInitError());
     return this._dbType;
@@ -110,6 +130,11 @@ export class StoreService {
   private get metadataModel(): CacheMetadataModel {
     assert(this._metadataModel, new NoInitError());
     return this._metadataModel;
+  }
+
+  private get schema(): string {
+    assert(this._schema, new NoInitError());
+    return this._schema;
   }
 
   // Initialize tables and data that isnt' specific to the users data
@@ -127,6 +152,7 @@ export class StoreService {
     );
 
     this._dbType = await getDbType(this.sequelize);
+    this._schema = schema;
 
     await this.sequelize.sync();
 
@@ -141,23 +167,52 @@ export class StoreService {
 
     this._metadataModel = this.storeCache.metadata;
 
+    await this.initHotSchemaReloadQueries(schema);
+
     this.metadataModel.set('historicalStateEnabled', this.historical);
-    this.metadataModel.setIncrement('schemaMigrationCount');
   }
 
-  async init(modelsRelations: GraphQLModelsRelationsEnums, schema: string): Promise<void> {
-    this._modelsRelations = modelsRelations;
-
+  async init(schema: string): Promise<void> {
     try {
-      await this.syncSchema(schema);
+      const tx = await this.sequelize.transaction();
+      if (this.historical) {
+        const [results] = await this.sequelize.query(BTREE_GIST_EXTENSION_EXIST_QUERY);
+        if (results.length === 0) {
+          throw new Error('Btree_gist extension is required to enable historical data, contact DB admin for support');
+        }
+      }
+      /*
+      On SyncSchema, if no schema migration is introduced, it would consider current schema to be null, and go all db operations again
+      every start up is a migration
+       */
+      const schemaMigrationService = new SchemaMigrationService(
+        this.sequelize,
+        this,
+        this.storeCache._flushCache.bind(this.storeCache),
+        schema,
+        this.config
+      );
+
+      await schemaMigrationService.run(null, this.subqueryProject.schema, tx);
+
+      const deploymentsRaw = await this.metadataModel.find('deployments');
+      const deployments = deploymentsRaw ? JSON.parse(deploymentsRaw) : {};
+
+      // Check if the deployment change or a local project is running
+      // WARNING:This assumes that the root is the same as the id for local project, there are no checks for this and it could change at any time
+      if (
+        this.subqueryProject.id === this.subqueryProject.root ||
+        last(Object.values(deployments)) !== this.subqueryProject.id
+      ) {
+        // TODO this should run with the same db transaction as the migration
+        this.metadataModel.setIncrement('schemaMigrationCount');
+      }
     } catch (e: any) {
-      logger.error(e, `Having a problem when syncing schema`);
-      process.exit(1);
+      exitWithError(new Error(`Having a problem when syncing schema`, {cause: e}), logger);
     }
-    await this.updateModels(schema, modelsRelations);
   }
 
-  async initHotSchemaReloadQueries(schema: string): Promise<void> {
+  private async initHotSchemaReloadQueries(schema: string): Promise<void> {
     if (this.dbType === SUPPORT_DB.cockRoach) {
       logger.warn(`Hot schema reload feature is not supported with ${this.dbType}`);
       return;
@@ -182,35 +237,12 @@ export class StoreService {
     }
   }
 
-  async syncSchema(schema: string): Promise<void> {
-    const tx = await this.sequelize.transaction();
-    if (this.historical) {
-      const [results] = await this.sequelize.query(BTREE_GIST_EXTENSION_EXIST_QUERY);
-      if (results.length === 0) {
-        throw new Error('Btree_gist extension is required to enable historical data, contact DB admin for support');
-      }
-    }
-    /*
-    On SyncSchema, if no schema migration is introduced, it would consider current schema to be null, and go all db operations again
-    every start up is a migration
-     */
-    const schemaMigrationService = new SchemaMigrationService(
-      this.sequelize,
-      this,
-      this.storeCache._flushCache.bind(this.storeCache),
-      schema,
-      this.config
-    );
-    await schemaMigrationService.run(null, this.subqueryProject.schema, tx);
-  }
-
   async updateModels(schema: string, modelsRelations: GraphQLModelsRelationsEnums): Promise<void> {
     this._modelsRelations = modelsRelations;
     try {
       this._modelIndexedFields = await this.getAllIndexFields(schema);
     } catch (e: any) {
-      logger.error(e, `Having a problem when get indexed fields`);
-      process.exit(1);
+      exitWithError(new Error(`Having a problem when getting indexed fields`, {cause: e}), logger);
     }
   }
 
@@ -245,7 +277,7 @@ export class StoreService {
       sequelizeModel.addHook('beforeValidate', (attributes, options) => {
         attributes.__block_range = [this.blockHeight, null];
       });
-      // TODO, remove id and block_range constrain, check id manually
+      // TODO, remove id and block_range constraint, check id manually
       // see https://github.com/subquery/subql/issues/1542
     }
 
@@ -272,10 +304,10 @@ export class StoreService {
       );
 
       if (metadataTableNames.length > 1 && !multiChain) {
-        logger.error(
-          'There are multiple projects in the database schema, if you are trying to multi-chain index use --multi-chain'
+        exitWithError(
+          'There are multiple projects in the database schema, if you are trying to multi-chain index use --multi-chain',
+          logger
         );
-        process.exit(1);
       }
 
       if (metadataTableNames.length === 1) {
@@ -284,10 +316,13 @@ export class StoreService {
           {type: QueryTypes.SELECT}
         );
 
-        const store = res.reduce(function (total, current) {
-          total[current.key] = current.value;
-          return total;
-        }, {} as {[key: string]: string | boolean});
+        const store = res.reduce(
+          function (total, current) {
+            total[current.key] = current.value;
+            return total;
+          },
+          {} as {[key: string]: string | boolean}
+        );
 
         const useHistorical =
           store.historicalStateEnabled === undefined ? !disableHistorical : (store.historicalStateEnabled as boolean);
@@ -405,7 +440,7 @@ group by
           (upperFirst(camelCase(indexField.entityName)) === entity || indexField.entityName === entity) &&
           // We add this because in some case upperFirst and camelCase will not match with entity name,
           // see test entity name like `MinerIP`
-          camelCase(indexField.fieldName) === field
+          camelCase(indexField.fieldName) === customCamelCaseGraphqlKey(field)
       ) > -1
     );
   }
@@ -415,7 +450,7 @@ group by
       this.modelIndexedFields.findIndex(
         (indexField) =>
           upperFirst(camelCase(indexField.entityName)) === entity &&
-          camelCase(indexField.fieldName) === field &&
+          camelCase(indexField.fieldName) === customCamelCaseGraphqlKey(field) &&
           // With historical indexes are not unique
           (this.historical || indexField.isUnique)
       ) > -1

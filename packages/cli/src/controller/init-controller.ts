@@ -4,16 +4,15 @@
 import childProcess, {execSync} from 'child_process';
 import fs from 'fs';
 import * as path from 'path';
-import {promisify} from 'util';
-import {DEFAULT_MANIFEST, DEFAULT_TS_MANIFEST, loadFromJsonOrYaml, makeTempDir} from '@subql/common';
-import {parseEthereumProjectManifest} from '@subql/common-ethereum';
-import {ProjectManifestV1_0_0} from '@subql/types-core';
+import {DEFAULT_MANIFEST, DEFAULT_TS_MANIFEST, loadFromJsonOrYaml, makeTempDir, NETWORK_FAMILY} from '@subql/common';
+import {ProjectManifestV1_0_0, ProjectNetworkConfig} from '@subql/types-core';
 import axios from 'axios';
 import {copySync} from 'fs-extra';
-import rimraf from 'rimraf';
+import {rimraf} from 'rimraf';
 import git from 'simple-git';
 import {parseDocument, YAMLMap, YAMLSeq} from 'yaml';
 import {BASE_TEMPLATE_URl, CAPTURE_CHAIN_ID_REG, CHAIN_ID_REG, ENDPOINT_REG} from '../constants';
+import {loadDependency} from '../modulars';
 import {isProjectSpecV1_0_0, ProjectSpecBase} from '../types';
 import {
   defaultEnvDevelopLocalPath,
@@ -71,7 +70,7 @@ export async function fetchTemplates(): Promise<Template[]> {
 
     return res.data.templates;
   } catch (e) {
-    errorHandle(e, `Update to reach endpoint '${BASE_TEMPLATE_URl}/all`);
+    throw errorHandle(e, `Update to reach endpoint '${BASE_TEMPLATE_URl}/all`);
   }
 }
 
@@ -82,7 +81,7 @@ export async function fetchNetworks(): Promise<Template[]> {
     const res = await axiosInstance.get<{results: Template[]}>('/networks');
     return res.data.results;
   } catch (e) {
-    errorHandle(e, `Update to reach endpoint '${BASE_TEMPLATE_URl}/networks`);
+    throw errorHandle(e, `Update to reach endpoint '${BASE_TEMPLATE_URl}/networks`);
   }
 }
 
@@ -95,7 +94,7 @@ export async function fetchExampleProjects(
     const res = await axiosInstance.get<{results: ExampleProjectInterface[]}>(`/networks/${familyCode}/${networkCode}`);
     return res.data.results;
   } catch (e) {
-    errorHandle(e, `Update to reach endpoint ${familyCode}/${networkCode}`);
+    throw errorHandle(e, `Update to reach endpoint ${familyCode}/${networkCode}`);
   }
 }
 
@@ -142,7 +141,7 @@ export async function cloneProjectTemplate(
 export async function readDefaults(projectPath: string): Promise<string[]> {
   const packageData = await fs.promises.readFile(`${projectPath}/package.json`);
   const currentPackage = JSON.parse(packageData.toString());
-  let endpoint: string | string[];
+  let endpoint: ProjectNetworkConfig['endpoint'];
   const defaultTsPath = defaultTSManifestPath(projectPath);
   const defaultYamlPath = defaultYamlManifestPath(projectPath);
 
@@ -151,7 +150,8 @@ export async function readDefaults(projectPath: string): Promise<string[]> {
     const extractedTsValues = extractFromTs(tsManifest.toString(), {
       endpoint: ENDPOINT_REG,
     });
-    endpoint = extractedTsValues.endpoint;
+
+    endpoint = extractedTsValues.endpoint ?? [];
   } else {
     const yamlManifest = await fs.promises.readFile(defaultYamlPath, 'utf8');
     const extractedYamlValues = parseDocument(yamlManifest).toJS() as ProjectManifestV1_0_0;
@@ -178,7 +178,7 @@ export async function prepare(projectPath: string, project: ProjectSpecBase): Pr
     throw new Error('Failed to prepare read or write package.json while preparing the project');
   }
   try {
-    await promisify(rimraf)(`${projectPath}/.git`);
+    await rimraf(`${projectPath}/.git`);
   } catch (e) {
     throw new Error('Failed to remove .git from template project');
   }
@@ -269,7 +269,7 @@ import path from 'path';
 const mode = process.env.NODE_ENV || 'production';
 
 // Load the appropriate .env file
-const dotenvPath = path.resolve(process.cwd(), \`.env\${mode !== 'production' ? \`.$\{mode}\` : ''}\`);
+const dotenvPath = path.resolve(__dirname, \`.env\${mode !== 'production' ? \`.$\{mode}\` : ''}\`);
 dotenv.config({ path: dotenvPath });
 `;
 
@@ -384,7 +384,9 @@ export async function validateEthereumProjectManifest(projectPath: string): Prom
     manifest = loadFromJsonOrYaml(path.join(projectPath, DEFAULT_MANIFEST));
   }
   try {
-    return isTs ? validateEthereumTsManifest(manifest) : !!parseEthereumProjectManifest(manifest);
+    return isTs
+      ? validateEthereumTsManifest(manifest)
+      : !!loadDependency(NETWORK_FAMILY.ethereum).parseProjectManifest(manifest);
   } catch (e) {
     return false;
   }

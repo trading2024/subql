@@ -1,10 +1,11 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import fs, {existsSync, readFileSync} from 'fs';
 import os from 'os';
 import path from 'path';
-import {promisify} from 'util';
+import {input} from '@inquirer/prompts';
 import {
   DEFAULT_ENV,
   DEFAULT_ENV_DEVELOP,
@@ -14,13 +15,10 @@ import {
   DEFAULT_MANIFEST,
   DEFAULT_TS_MANIFEST,
 } from '@subql/common';
-import {SubqlRuntimeHandler} from '@subql/common-ethereum';
 import axios from 'axios';
-import cli, {ux} from 'cli-ux';
 import ejs from 'ejs';
-import inquirer, {Inquirer} from 'inquirer';
 import JSON5 from 'json5';
-import rimraf from 'rimraf';
+import {rimraf} from 'rimraf';
 import {ACCESS_TOKEN_PATH} from '../constants';
 
 export async function delay(sec: number): Promise<void> {
@@ -29,68 +27,56 @@ export async function delay(sec: number): Promise<void> {
   });
 }
 
-export async function valueOrPrompt<T>(value: T, msg: string, error: string): Promise<T> {
+export async function valueOrPrompt(
+  value: string | undefined,
+  msg: string,
+  error: string
+): Promise<NonNullable<string>> {
   if (value) return value;
   try {
-    return await cli.prompt(msg);
+    return await input({
+      message: msg,
+      required: true,
+    });
   } catch (e) {
     throw new Error(error);
   }
 }
 
-export function addV(str: string | undefined): string {
+export function addV<T extends string | undefined>(str: T): T {
   // replaced includes to first byte.
   if (str && str[0] !== 'v') {
-    return `v${str}`;
+    return `v${str}` as T;
   }
   return str;
 }
 
-export async function promptWithDefaultValues(
-  promptType: Inquirer | typeof ux,
-  msg: string,
-  defaultValue?: string,
-  choices?: string[],
-  required?: boolean
-): Promise<string> {
-  const promptValue =
-    promptType === inquirer
-      ? (
-          await promptType.prompt({
-            name: 'runnerVersions',
-            message: msg,
-            type: 'list',
-            choices: choices,
-          })
-        ).runnerVersions
-      : await promptType.prompt(msg, {default: defaultValue, required: required});
-  return promptValue;
-}
-
 export async function checkToken(token_path: string = ACCESS_TOKEN_PATH): Promise<string> {
+  const reqInput = () => input({message: 'Token cannot be found, Enter token', required: true});
+
   const envToken = process.env.SUBQL_ACCESS_TOKEN;
   if (envToken) return envToken;
   if (existsSync(token_path)) {
     try {
       const authToken = readFileSync(token_path, 'utf8');
       if (!authToken) {
-        return await cli.prompt('Token cannot be found, Enter token');
+        return await reqInput();
       }
       return authToken.trim();
     } catch (e) {
-      return cli.prompt('Token cannot be found, Enter token');
+      return reqInput();
     }
   } else {
-    return cli.prompt('Token cannot be found, Enter token');
+    return reqInput();
   }
 }
 
 export function errorHandle(e: any, msg: string): Error {
   if (axios.isAxiosError(e) && e?.response?.data) {
-    throw new Error(`${msg} ${e.response.data.message ?? e.response.data}`);
+    return new Error(`${msg} ${e.response.data.message ?? e.response.data}`);
   }
 
-  throw new Error(`${msg} ${e.message}`);
+  return new Error(`${msg} ${e.message}`);
 }
 
 export function buildProjectKey(org: string, projectName: string): string {
@@ -104,11 +90,11 @@ export async function renderTemplate(templatePath: string, outputPath: string, t
 
 export async function prepareDirPath(path: string, recreate: boolean): Promise<void> {
   try {
-    await promisify(rimraf)(path);
+    await rimraf(path);
     if (recreate) {
       await fs.promises.mkdir(path, {recursive: true});
     }
-  } catch (e) {
+  } catch (e: any) {
     throw new Error(`Failed to prepare ${path}: ${e.message}`);
   }
 }
@@ -138,7 +124,7 @@ export function findMatchingIndices(
   //  This regex would work in engines that support recursion, such as PCRE (Perl-Compatible Regular Expressions).
 
   let openCount = 0;
-  let startIndex: number;
+  let startIndex: number | undefined;
   const pairs: [number, number][] = [];
 
   for (let i = startFrom; i < content.length; i++) {
@@ -148,6 +134,7 @@ export function findMatchingIndices(
     } else if (content[i] === endChar) {
       openCount--;
       if (openCount === 0) {
+        assert(startIndex !== undefined, 'startIndex should be defined');
         pairs.push([startIndex, i]);
         break;
       }
@@ -175,34 +162,6 @@ export function extractArrayValueFromTsManifest(content: string, key: string): s
   return content.slice(startIndex, endIndex + 1);
 }
 
-export function tsStringify(
-  obj: SubqlRuntimeHandler | SubqlRuntimeHandler[] | string,
-  indent = 2,
-  currentIndent = 0
-): string {
-  if (typeof obj !== 'object' || obj === null) {
-    if (typeof obj === 'string' && obj.includes('EthereumHandlerKind')) {
-      return obj; // Return the string as-is without quotes
-    }
-    return JSON.stringify(obj);
-  }
-
-  if (Array.isArray(obj)) {
-    const items = obj.map((item) => tsStringify(item, indent, currentIndent + indent));
-    return `[\n${items.map((item) => ' '.repeat(currentIndent + indent) + item).join(',\n')}\n${' '.repeat(
-      currentIndent
-    )}]`;
-  }
-
-  const entries = Object.entries(obj);
-  const result = entries.map(([key, value]) => {
-    const valueStr = tsStringify(value, indent, currentIndent + indent);
-    return `${' '.repeat(currentIndent + indent)}${key}: ${valueStr}`;
-  });
-
-  return `{\n${result.join(',\n')}\n${' '.repeat(currentIndent)}}`;
-}
-
 export function extractFromTs(
   manifest: string,
   patterns: {[key: string]: RegExp | undefined}
@@ -214,7 +173,9 @@ export function extractFromTs(
   const nestArr = ['dataSources', 'handlers'];
   for (const key in patterns) {
     if (!nestArr.includes(key)) {
-      const match = manifest.match(patterns[key]);
+      const regExp = patterns[key];
+      assert(regExp, `Pattern for ${key} is not defined`);
+      const match = manifest.match(regExp);
 
       if (arrKeys.includes(key) && match) {
         const inputStr = match[1].replace(/`/g, '"');
@@ -286,7 +247,7 @@ export function defaultGitIgnorePath(projectPath: string): string {
   return path.join(projectPath, DEFAULT_GIT_IGNORE);
 }
 
-export function copyFolderSync(source: string, target: string) {
+export function copyFolderSync(source: string, target: string): void {
   if (!fs.existsSync(target)) {
     fs.mkdirSync(target, {recursive: true});
   }

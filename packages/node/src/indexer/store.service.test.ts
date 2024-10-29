@@ -1,7 +1,6 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import { promisify } from 'util';
 import { INestApplication } from '@nestjs/common';
 import {
   createNotifyTrigger,
@@ -11,7 +10,7 @@ import {
   getTriggers,
 } from '@subql/node-core';
 import { QueryTypes, Sequelize } from '@subql/x-sequelize';
-import rimraf from 'rimraf';
+import { rimraf } from 'rimraf';
 import { prepareApp } from '../utils/test.utils';
 import { ApiService } from './api.service';
 import { ProjectService } from './project.service';
@@ -46,7 +45,7 @@ describe('Store service integration test', () => {
   });
 
   afterAll(async () => {
-    await promisify(rimraf)(tempDir);
+    await rimraf(tempDir);
   });
 
   it('Correct db sync on historical project', async () => {
@@ -64,7 +63,7 @@ describe('Store service integration test', () => {
 
     tempDir = (projectService as any).project.root;
 
-    const [result] = await sequelize.query(
+    const result = await sequelize.query<{ table_name: string }>(
       `
        SELECT 
           table_name
@@ -74,12 +73,11 @@ describe('Store service integration test', () => {
           table_schema = :schema; 
         `,
       {
+        type: QueryTypes.SELECT,
         replacements: { schema: schemaName },
       },
     );
-    const expectedTables = result.map(
-      (t: { table_name: string }) => t.table_name,
-    );
+    const expectedTables = result.map((t) => t.table_name);
 
     const columnResult = await sequelize.query(
       `
@@ -278,7 +276,7 @@ WHERE
 
     tempDir = (projectService as any).project.root;
 
-    const result = await sequelize.query(
+    const result = await sequelize.query<{ enum_type: string }>(
       `
       SELECT n.nspname AS schema_name,
        t.typname AS enum_type,
@@ -291,9 +289,11 @@ ORDER BY t.typname, e.enumsortorder;`,
       { type: QueryTypes.SELECT, replacements: { schema: schemaName } },
     );
     expect(result.length).toBe(3);
-    expect(result.map((r: { enum_type: string }) => r.enum_type)).toStrictEqual(
-      ['65c7fd4e5d', '65c7fd4e5d', '65c7fd4e5d'],
-    );
+    expect(result.map((r) => r.enum_type)).toStrictEqual([
+      '65c7fd4e5d',
+      '65c7fd4e5d',
+      '65c7fd4e5d',
+    ]);
   });
   it('Able to drop notification triggers and functions', async () => {
     // if subscription is no longer enabled should be able to drop all prior triggers and functions related to subscription

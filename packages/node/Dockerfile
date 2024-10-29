@@ -1,6 +1,5 @@
 # Build stage
 FROM node:18-alpine as builder
-
 # Set working directory
 WORKDIR /app
 
@@ -30,8 +29,14 @@ RUN apk add --no-cache tini curl git && \
     yarn cache clean && \
     rm -rf /root/.npm /root/.cache
 
+# Create ./.monitor directory and set permissions
+RUN mkdir -p .monitor && \
+    chown 1000:1000 .monitor
+
 # Make the user not ROOT
 USER 1000
+# Fix timezone to UTC
+ENV TZ=utc
 
 # Set Entry point and command
 ENTRYPOINT ["/sbin/tini", "--", "/bin/run"]

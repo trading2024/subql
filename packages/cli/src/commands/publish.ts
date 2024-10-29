@@ -1,6 +1,7 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import path from 'path';
 import {Command, Flags} from '@oclif/core';
 import {getMultichainManifestPath, getProjectRootAndManifest} from '@subql/common';
@@ -23,7 +24,7 @@ export default class Publish extends Command {
 
     try {
       await Build.run(['--location', location, '-s']);
-    } catch (e) {
+    } catch (e: any) {
       this.log(e);
       this.error('Failed to build project');
     }
@@ -41,11 +42,21 @@ export default class Publish extends Command {
     }
 
     const fileToCidMap = await uploadToIpfs(fullPaths, authToken.trim(), multichainManifestPath, flags.ipfs).catch(
-      (e) => this.error(e)
+      (e) => {
+        // log further cause from error
+        if (e.cause) {
+          console.error(e.cause);
+        }
+        return this.error(e);
+      }
     );
 
     await Promise.all(
-      project.manifests.map((manifest) => createIPFSFile(project.root, manifest, fileToCidMap.get(path.join(manifest))))
+      project.manifests.map((manifest) => {
+        const cid = fileToCidMap.get(manifest);
+        assert(cid, `CID for ${manifest} not found`);
+        return createIPFSFile(project.root, manifest, cid);
+      })
     );
 
     const directoryCid = Array.from(fileToCidMap).find(([file]) => file === '');

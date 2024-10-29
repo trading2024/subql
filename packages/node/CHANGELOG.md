@@ -6,6 +6,121 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.8] - 2024-10-23
+### Changed
+- Bump `@subql/common-substrate` dependency
+
+## [5.2.7] - 2024-10-21
+### Fixed
+- Issues with setting a large block range for bypass blocks (#2566)
+
+## [5.2.6] - 2024-09-25
+### Changed
+- Bump common, Added manifest support for query-subgraph.
+
+## [5.2.5] - 2024-09-09
+### Changed
+- Update Dependency `node-core`
+
+## [5.2.3] - 2024-08-23
+### Fixed
+- Revert rimraf version
+
+## [5.2.2] - 2024-08-14
+### Added
+- Update polkadot/api library
+
+## [5.2.1] - 2024-08-12
+### Fixed
+- Subcommands not working because of yargs dependency
+
+## [5.2.0] - 2024-08-05
+### Changed
+- Update dependencies (#2518)
+
+## [5.1.0] - 2024-08-01
+### Added
+- Support endpoint configs and specifying headers for network endpoints (#2511)
+
+### Fixed
+- Fixed timestamp can be undefined in some network blocks, it should return undefined (#2513)
+
+## [5.0.2] - 2024-07-31
+### Fixed
+- Fixed api not reloading new deployment chainTypes when project upgrades (#2505)
+
+## [5.0.1] - 2024-07-29
+### Fixed
+- Fixed default Timezone to UTC in dockerfile and package.json (#2505)
+- Bump with `node-core`, fixed various data consistency issue with db and cache (#2504)
+
+## [5.0.0] - 2024-07-25
+### Changed
+- Breaking change: Update with `@subql/node-core`, require indexing environment timezone set to UTC (#2495)
+- Update SubqueryProject to use code from node-core (#2496)
+
+### Fixed
+- Bump with `@subql/node-core`, fixed various issues causing poi inconsistency (#2497)
+
+## [4.9.0] - 2024-07-22
+### Changed
+- Tidy up modules to match changes with node-core (#2491)
+
+## [4.8.2] - 2024-07-16
+### Fixed
+- Fix dockerfile missing set timezone to UTC (#2489)
+
+## [4.8.1] - 2024-07-11
+### Removed
+- Unused type (#2484)
+
+### Changed
+- Make change with `node-core` fetch service, change `getFinalizedHeight` to `getFinalizedHeader` (#2487)
+
+## [4.8.0] - 2024-07-10
+### Changed
+- Bump with `@subql/node-core`, fix admin api `dbSize` issue
+
+## [4.7.1] - 2024-07-09
+### Added
+- Enable ts strict model
+
+### Fixed
+- "currentRuntimeVersion is undefined" error (#2475)
+
+## [4.7.0] - 2024-07-01
+### Changed
+- Update with `@subql/node-core`, `@subql/common-substrate`
+
+## [4.6.6] - 2024-06-21
+### Fixed
+- Update with common-substrate, fix `EventFilter` incorrectly extend `BlockFilter`, lead dictionary error (#2463)
+- Fix dictionary query entries included undefined fields (#2463)
+
+## [4.6.5] - 2024-06-18
+### Fixed
+- Add missing chainType validation for local mode
+
+## [4.6.4] - 2024-06-12
+### Changed
+- Update `@subql/utils`
+
+## [4.6.3] - 2024-06-12
+### Changed
+- Update polkadot dependencies to 11.2.1 (#2440)
+
+## [4.6.2] - 2024-06-06
+### Fixed
+- Fix import monitor service from node-core
+
+## [4.6.1] - 2024-06-06
+### Fixed
+- Fix import admin from node-core, update dockerfile to fix monitor default directory permission issue
+
+## [4.6.0] - 2024-06-05
+### Added
+- Add monitor service to record block indexing actions in order to improve POI accuracy, and provide debug info for Admin api
+
 ## [4.5.1] - 2024-05-27
 ### Fixed
 - Error processing chain types
@@ -1204,7 +1319,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - bump @polkadot/api to 3.1.1
 
-[Unreleased]: https://github.com/subquery/subql/compare/node/4.5.1...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/node/5.2.8...HEAD
+[5.2.8]: https://github.com/subquery/subql/compare/node/5.2.7...node/5.2.8
+[5.2.7]: https://github.com/subquery/subql/compare/node/5.2.6...node/5.2.7
+[5.2.6]: https://github.com/subquery/subql/compare/node/5.2.5...node/5.2.6
+[5.2.5]: https://github.com/subquery/subql/compare/node/5.2.3...node/5.2.5
+[5.2.3]: https://github.com/subquery/subql/compare/node/5.2.2...node/5.2.3
+[5.2.2]: https://github.com/subquery/subql/compare/node/5.2.1...node/5.2.2
+[5.2.1]: https://github.com/subquery/subql/compare/node/5.2.0...node/5.2.1
+[5.2.0]: https://github.com/subquery/subql/compare/node/5.1.0...node/5.2.0
+[5.1.0]: https://github.com/subquery/subql/compare/node/5.0.2...node/5.1.0
+[5.0.2]: https://github.com/subquery/subql/compare/node/5.0.1...node/5.0.2
+[5.0.1]: https://github.com/subquery/subql/compare/node/5.0.0...node/5.0.1
+[5.0.0]: https://github.com/subquery/subql/compare/node/4.9.0...node/5.0.0
+[4.9.0]: https://github.com/subquery/subql/compare/node/4.8.2...node/4.9.0
+[4.8.2]: https://github.com/subquery/subql/compare/node/4.8.1...node/4.8.2
+[4.8.1]: https://github.com/subquery/subql/compare/node/4.8.0...node/4.8.1
+[4.8.0]: https://github.com/subquery/subql/compare/node/4.7.1...node/4.8.0
+[4.7.1]: https://github.com/subquery/subql/compare/node/4.7.0...node/4.7.1
+[4.7.0]: https://github.com/subquery/subql/compare/node/4.6.6...node/4.7.0
+[4.6.6]: https://github.com/subquery/subql/compare/node/4.6.5...node/4.6.6
+[4.6.5]: https://github.com/subquery/subql/compare/node/4.6.4...node/4.6.5
+[4.6.4]: https://github.com/subquery/subql/compare/node/4.6.3...node/4.6.4
+[4.6.3]: https://github.com/subquery/subql/compare/node/4.6.2...node/4.6.3
+[4.6.2]: https://github.com/subquery/subql/compare/node/4.6.1...node/4.6.2
+[4.6.1]: https://github.com/subquery/subql/compare/node/4.6.0...node/4.6.1
+[4.6.0]: https://github.com/subquery/subql/compare/node/4.5.1...node/4.6.0
 [4.5.1]: https://github.com/subquery/subql/compare/node/4.5.0...node/4.5.1
 [4.5.0]: https://github.com/subquery/subql/compare/node/4.4.2...node/4.5.0
 [4.4.2]: https://github.com/subquery/subql/compare/node/4.4.1...node/4.4.2

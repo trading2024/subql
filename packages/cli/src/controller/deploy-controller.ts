@@ -1,8 +1,9 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import {Flags} from '@oclif/core';
-import {FlagInput} from '@oclif/core/lib/interfaces/parser';
+import {FlagInput, OptionFlag} from '@oclif/core/lib/interfaces/parser';
 import axios, {Axios} from 'axios';
 import chalk from 'chalk';
 import {BASE_PROJECT_URL, DEFAULT_DEPLOYMENT_TYPE, ROOT_API_URL_PROD} from '../constants';
@@ -17,6 +18,7 @@ import {
   GenerateDeploymentChainInterface,
   DeploymentFlagsInterface,
   MultichainDataFieldType,
+  DeploymentType,
 } from '../types';
 import {buildProjectKey, errorHandle} from '../utils';
 
@@ -39,7 +41,7 @@ export async function createDeployment(
   authToken: string,
   ipfsCID: string,
   queryImageVersion: string,
-  type: string,
+  type: DeploymentType,
   query: QueryAdvancedOpts,
   chains: V3DeploymentIndexerType[],
   url: string
@@ -53,11 +55,11 @@ export async function createDeployment(
         queryImageVersion: queryImageVersion,
         queryAdvancedSettings: {query},
         chains,
-      } as V3DeploymentInput
+      } satisfies V3DeploymentInput
     );
     return res.data.deployment;
   } catch (e) {
-    errorHandle(e, 'Error deploying to hosted service:');
+    throw errorHandle(e, 'Error deploying to hosted service:');
   }
 }
 
@@ -74,7 +76,7 @@ export async function promoteDeployment(
     );
     return `${deploymentId}`;
   } catch (e) {
-    errorHandle(e, 'Failed to promote project:');
+    throw errorHandle(e, 'Failed to promote project:');
   }
 }
 
@@ -91,7 +93,7 @@ export async function deleteDeployment(
     );
     return `${deploymentId}`;
   } catch (e) {
-    errorHandle(e, 'Failed to delete deployment:');
+    throw errorHandle(e, 'Failed to delete deployment:');
   }
 }
 
@@ -108,7 +110,7 @@ export async function deploymentStatus(
     );
     return `${res.data.status}`;
   } catch (e) {
-    errorHandle(e, 'Failed to get deployment status:');
+    throw errorHandle(e, 'Failed to get deployment status:');
   }
 }
 
@@ -118,15 +120,16 @@ export async function projectsInfo(
   projectName: string,
   url: string,
   type: string
-): Promise<ProjectDataType> {
+): Promise<ProjectDataType | undefined> {
   const key = `${org}/${projectName}`;
   try {
     const res = await getAxiosInstance(url, authToken).get<ProjectDataType[]>(
-      `subqueries/${buildProjectKey(org, projectName)}/deployments`
+      `v3/subqueries/${buildProjectKey(org, projectName)}/deployments`
     );
+
     return res.data.find((element) => element.projectKey === `${key}` && element.type === type);
   } catch (e) {
-    errorHandle(e, 'Failed to get projects:');
+    throw errorHandle(e, 'Failed to get projects:');
   }
 }
 
@@ -152,11 +155,16 @@ export async function updateDeployment(
       } as V3DeploymentInput
     );
   } catch (e) {
-    errorHandle(e, `Failed to redeploy project: ${e.message}`);
+    throw errorHandle(e, `Failed to redeploy project: ${(e as any).message}`);
   }
 }
 
-export async function ipfsCID_validate(cid: string, authToken: string, url: string): Promise<ValidateDataType> {
+export async function ipfsCID_validate(
+  cid: string | undefined,
+  authToken: string,
+  url: string
+): Promise<ValidateDataType> {
+  assert(cid, 'IPFS CID is required');
   try {
     const res = await getAxiosInstance(url, authToken).post<ValidateDataType>(`ipfs/deployment-id/${cid}/validate`);
 
@@ -166,22 +174,8 @@ export async function ipfsCID_validate(cid: string, authToken: string, url: stri
 
     return res.data;
   } catch (e) {
-    errorHandle(e, 'Failed to validate IPFS CID:');
+    throw errorHandle(e, 'Failed to validate IPFS CID:');
   }
-}
-
-export async function dictionaryEndpoints(url: string): Promise<EndpointType[]> {
-  try {
-    const res = await getAxiosInstance(url).get<EndpointType[]>(`subqueries/dictionaries`);
-
-    return res.data;
-  } catch (e) {
-    errorHandle(e, 'Failed to get dictionary endpoint:');
-  }
-}
-
-export function processEndpoints(endpoints: EndpointType[], chainId: string): string | undefined {
-  return endpoints.find((endpoint: EndpointType) => endpoint.chainId === chainId)?.endpoint;
 }
 
 export async function imageVersions(name: string, version: string, authToken: string, url: string): Promise<string[]> {
@@ -191,7 +185,7 @@ export async function imageVersions(name: string, version: string, authToken: st
     );
     return res.data;
   } catch (e) {
-    errorHandle(e, 'Failed to get image:');
+    throw errorHandle(e, 'Failed to get image:');
   }
 }
 
@@ -205,15 +199,15 @@ export interface EndpointType {
   chainId: string;
 }
 
-export function splitMultichainDataFields(fieldStr: string): MultichainDataFieldType {
+export function splitMultichainDataFields(fieldStr = ''): MultichainDataFieldType {
   const result: MultichainDataFieldType = {};
 
   splitEndpoints(String(fieldStr)).forEach((unparsedRow) => {
-    let regexpResult: string[] = unparsedRow.match(/(.*?):(.*)/);
+    const regexpResult = unparsedRow.match(/(.*?):(.*)/);
     if (regexpResult) {
-      regexpResult = Object.values(regexpResult);
-      if (regexpResult && regexpResult.length === 6 && ['http', 'https', 'ws', 'wss'].indexOf(regexpResult[1]) === -1) {
-        result[regexpResult[1]] = regexpResult[2];
+      const regexpRes = Object.values(regexpResult);
+      if (regexpRes && regexpRes.length === 6 && ['http', 'https', 'ws', 'wss'].indexOf(regexpRes[1]) === -1) {
+        result[regexpRes[1]] = regexpRes[2];
       }
     }
   });
@@ -226,7 +220,11 @@ export const DefaultDeployFlags = {
   projectName: Flags.string({description: 'Enter project name'}),
   // ipfsCID: Flags.string({description: 'Enter IPFS CID'}),
 
-  type: Flags.string({options: ['stage', 'primary'], default: DEFAULT_DEPLOYMENT_TYPE, required: false}),
+  type: Flags.string({
+    options: ['stage', 'primary'],
+    default: DEFAULT_DEPLOYMENT_TYPE,
+    required: false,
+  }) as OptionFlag<DeploymentType>,
   indexerVersion: Flags.string({description: 'Enter indexer-version', required: false}),
   queryVersion: Flags.string({description: 'Enter query-version', required: false}),
   dict: Flags.string({description: 'Enter dictionary', required: false}),
@@ -304,8 +302,6 @@ export function generateAdvancedQueryOptions(flags: DeploymentFlagsInterface): Q
 }
 
 export async function executeProjectDeployment(data: ProjectDeploymentInterface): Promise<DeploymentDataType | void> {
-  let deploymentOutput: DeploymentDataType | void;
-
   if (data.projectInfo !== undefined) {
     await updateDeployment(
       data.org,
@@ -320,7 +316,7 @@ export async function executeProjectDeployment(data: ProjectDeploymentInterface)
     );
     data.log(`Project: ${data.projectName} has been re-deployed`);
   } else {
-    deploymentOutput = await createDeployment(
+    const deploymentOutput = await createDeployment(
       data.org,
       data.projectName,
       data.authToken,
@@ -330,25 +326,23 @@ export async function executeProjectDeployment(data: ProjectDeploymentInterface)
       generateAdvancedQueryOptions(data.flags),
       data.chains,
       ROOT_API_URL_PROD
-    ).catch((e) => {
-      throw e;
-    });
+    );
 
     if (deploymentOutput) {
       data.log(`Project: ${deploymentOutput.projectKey}
-      \nStatus: ${chalk.blue(deploymentOutput.status)}
-      \nDeploymentID: ${deploymentOutput.id}
-      \nDeployment Type: ${deploymentOutput.type}
-      \nIndexer version: ${deploymentOutput.indexerImage}
-      \nQuery version: ${deploymentOutput.queryImage}
-      \nEndpoint: ${deploymentOutput.endpoint}
-      \nDictionary Endpoint: ${deploymentOutput.dictEndpoint}
-      \nQuery URL: ${deploymentOutput.queryUrl}
-      \nProject URL: ${BASE_PROJECT_URL}/project/${deploymentOutput.projectKey}
-      \nAdvanced Settings for Query: ${JSON.stringify(deploymentOutput.configuration.config.query)}
-      \nAdvanced Settings for Indexer: ${JSON.stringify(deploymentOutput.configuration.config.indexer)}
+Status: ${chalk.blue(deploymentOutput.status)}
+DeploymentID: ${deploymentOutput.id}
+Deployment Type: ${deploymentOutput.type}
+Indexer version: ${deploymentOutput.indexerImage}
+Query version: ${deploymentOutput.queryImage}
+Endpoint: ${deploymentOutput.endpoint}
+Dictionary Endpoint: ${deploymentOutput.dictEndpoint}
+Query URL: ${deploymentOutput.queryUrl}
+Project URL: ${BASE_PROJECT_URL}/org/${data.org}/project/${data.projectName}
+Advanced Settings for Query: ${JSON.stringify(deploymentOutput.configuration.config.query)}
+Advanced Settings for Indexer: ${JSON.stringify(deploymentOutput.configuration.config.indexer)}
       `);
     }
+    return deploymentOutput;
   }
-  return deploymentOutput;
 }

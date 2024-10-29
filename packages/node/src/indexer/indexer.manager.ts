@@ -16,7 +16,6 @@ import {
 } from '@subql/common-substrate';
 import {
   NodeConfig,
-  getLogger,
   profiler,
   SandboxService,
   IndexerSandbox,
@@ -39,8 +38,6 @@ import { DsProcessorService } from './ds-processor.service';
 import { DynamicDsService } from './dynamic-ds.service';
 import { ApiAt, BlockContent, isFullBlock, LightBlockContent } from './types';
 import { UnfinalizedBlocksService } from './unfinalizedBlocks.service';
-
-const logger = getLogger('indexer');
 
 @Injectable()
 export class IndexerManager extends BaseIndexerManager<
@@ -81,7 +78,7 @@ export class IndexerManager extends BaseIndexerManager<
   async indexBlock(
     block: IBlock<BlockContent | LightBlockContent>,
     dataSources: SubstrateDatasource[],
-    runtimeVersion: RuntimeVersion,
+    runtimeVersion?: RuntimeVersion,
   ): Promise<ProcessBlockResponse> {
     return super.internalIndexBlock(block, dataSources, () =>
       this.getApi(block.block, runtimeVersion),
@@ -91,7 +88,7 @@ export class IndexerManager extends BaseIndexerManager<
   // eslint-disable-next-line @typescript-eslint/require-await
   private async getApi(
     block: LightBlockContent | BlockContent,
-    runtimeVersion: RuntimeVersion,
+    runtimeVersion?: RuntimeVersion,
   ): Promise<ApiAt> {
     return this.apiService.getPatchedApi(
       block.block.block.header,
@@ -177,12 +174,6 @@ export class IndexerManager extends BaseIndexerManager<
     return Promise.resolve(data);
   }
 }
-
-type ProcessorTypeMap = {
-  [SubstrateHandlerKind.Block]: typeof isBlockHandlerProcessor;
-  [SubstrateHandlerKind.Event]: typeof isEventHandlerProcessor;
-  [SubstrateHandlerKind.Call]: typeof isCallHandlerProcessor;
-};
 
 const ProcessorTypeMap = {
   [SubstrateHandlerKind.Block]: isBlockHandlerProcessor,

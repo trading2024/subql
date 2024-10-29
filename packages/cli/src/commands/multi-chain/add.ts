@@ -1,8 +1,9 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
+import {input} from '@inquirer/prompts';
 import {Command, Flags} from '@oclif/core';
-import {cli} from 'cli-ux';
 import {addChain} from '../../controller/add-chain-controller';
 import {resolveToAbsolutePath} from '../../utils';
 
@@ -21,8 +22,9 @@ export default class MultiChainAdd extends Command {
     let {chainManifestPath} = flags;
 
     if (!chainManifestPath) {
-      chainManifestPath = await cli.prompt('Enter the path to the new chain manifest');
+      chainManifestPath = await input({message: 'Enter the path to the new chain manifest'});
     }
+    assert(chainManifestPath, 'Chain manifest path is required');
 
     await addChain(multichain, resolveToAbsolutePath(chainManifestPath));
   }

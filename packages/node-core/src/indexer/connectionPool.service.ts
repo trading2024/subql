@@ -40,7 +40,10 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
   private cacheSizeThreshold = 10;
   private cacheFlushInterval = 60 * 100;
 
-  constructor(private nodeConfig: NodeConfig, private poolStateManager: ConnectionPoolStateManager<T>) {
+  constructor(
+    private nodeConfig: NodeConfig,
+    private poolStateManager: ConnectionPoolStateManager<T>
+  ) {
     this.cacheSizeThreshold = this.nodeConfig.batchSize;
   }
 
@@ -50,7 +53,7 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
 
   async addToConnections(api: T, endpoint: string): Promise<void> {
     this.allApi[endpoint] = api;
-    await this.poolStateManager.addToConnections(endpoint, endpoint === this.nodeConfig.primaryNetworkEndpoint);
+    await this.poolStateManager.addToConnections(endpoint, endpoint === this.nodeConfig.primaryNetworkEndpoint?.[0]);
     if (api !== null) {
       await this.updateNextConnectedApiIndex();
     }
@@ -112,8 +115,8 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
               await this.handleApiSuccess(endpoint, end - start);
               await this.poolStateManager.setFieldValue(endpoint, 'lastRequestTime', end); // Update the last request time
               return result;
-            } catch (error) {
-              await this.handleApiError(endpoint, target.handleError(error as Error));
+            } catch (error: any) {
+              await this.handleApiError(endpoint, target.handleError(error));
               throw error;
             }
           };
@@ -246,5 +249,12 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
     this.resultCache = [];
     this.lastCacheFlushTime = Date.now();
     await this.handleConnectionStateChange();
+  }
+
+  async updateChainTypes(newChainTypes: unknown): Promise<void> {
+    for (const endpoint in this.allApi) {
+      await this.allApi[endpoint].updateChainTypes?.(newChainTypes);
+    }
+    logger.info(`Network chain types updated!`);
   }
 }

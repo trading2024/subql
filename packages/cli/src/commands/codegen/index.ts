@@ -54,8 +54,8 @@ export default class Codegen extends Command {
 
     try {
       await codegen(root, manifests);
-    } catch (err) {
-      console.error(err.message);
+    } catch (err: any) {
+      console.error(err.message, err.cause);
       process.exit(1);
     }
   }

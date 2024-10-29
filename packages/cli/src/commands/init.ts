@@ -1,19 +1,18 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
-import {URL} from 'url';
+import {search, confirm, input} from '@inquirer/prompts';
 import {Args, Command, Flags} from '@oclif/core';
 import {NETWORK_FAMILY} from '@subql/common';
 import chalk from 'chalk';
-import cli from 'cli-ux';
 import fuzzy from 'fuzzy';
-import * as inquirer from 'inquirer';
+import ora from 'ora';
 import {
   installDependencies,
   cloneProjectTemplate,
-  cloneProjectGit,
   readDefaults,
   prepare,
   prepareProjectScaffold,
@@ -25,41 +24,13 @@ import {
 import {ProjectSpecBase} from '../types';
 import {resolveToAbsolutePath} from '../utils';
 import Generate from './codegen/generate';
-inquirer.registerPrompt('autocomplete', require('inquirer-autocomplete-prompt'));
 
 // Helper function for fuzzy search on prompt input
-function filterInput(arr: string[]) {
-  return (_: string, input: string) => {
-    input = input || '';
-    return new Promise((resolve) => {
-      resolve(
-        fuzzy.filter(input, arr).map((el) => {
-          return el.original;
-        })
-      );
-    });
+function filterInput<T>(arr: T[]) {
+  return (input: string | undefined): Promise<ReadonlyArray<{value: T}>> => {
+    input ??= '';
+    return Promise.resolve(fuzzy.filter(input, arr).map((r) => ({value: r.original})));
   };
-}
-
-async function promptValidRemoteAndBranch(): Promise<string[]> {
-  let isValid = false;
-  let remote: string;
-  while (!isValid) {
-    try {
-      remote = await cli.prompt('Custom template git remote', {
-        required: true,
-      });
-      new URL(remote);
-      isValid = true;
-    } catch (e) {
-      console.log(`Not a valid git remote URL: '${remote}', try again`);
-      continue;
-    }
-  }
-  const branch = await cli.prompt('Custom template git branch', {
-    required: true,
-  });
-  return [remote, branch];
 }
 
 export default class Init extends Command {
@@ -78,186 +49,159 @@ export default class Init extends Command {
       description: 'Give the starter project name',
     }),
   };
-  private projectPath: string; //path on GitHub
-  private project: ProjectSpecBase;
-  private location: string;
-  private networkFamily: NETWORK_FAMILY;
-  private network: string;
 
   async run(): Promise<void> {
     const {args, flags} = await this.parse(Init);
 
-    this.location = flags.location ? resolveToAbsolutePath(flags.location) : process.cwd();
-    this.project = {} as ProjectSpecBase;
-    this.project.name = args.projectName
+    const location = flags.location ? resolveToAbsolutePath(flags.location) : process.cwd();
+    const project = {} as ProjectSpecBase;
+    project.name = args.projectName
       ? args.projectName
-      : await cli.prompt('Project name', {default: 'subql-starter', required: true});
-    if (fs.existsSync(path.join(this.location, `${this.project.name}`))) {
-      throw new Error(`Directory ${this.project.name} exists, try another project name`);
+      : await input({
+          message: 'Project name',
+          default: 'subql-starter',
+          required: true,
+        });
+    if (fs.existsSync(path.join(location, `${project.name}`))) {
+      throw new Error(`Directory ${project.name} exists, try another project name`);
     }
 
     const networkTemplates = await fetchNetworks();
 
     //Family selection
     const families = networkTemplates.map(({name}) => name);
-    await inquirer
-      .prompt([
-        {
-          name: 'familyResponse',
-          message: 'Select a network family',
-          type: 'autocomplete',
-          searchText: '',
-          emptyText: 'Network family not found',
-          pageSize: 20,
-          source: filterInput(families),
-        },
-      ])
-      .then(({familyResponse}) => {
-        this.networkFamily = familyResponse;
-      });
+
+    const networkFamily = await search<NETWORK_FAMILY>({
+      message: 'Select a network family',
+      source: filterInput<NETWORK_FAMILY>(families as NETWORK_FAMILY[]),
+      pageSize: 20,
+    });
 
     // if network family is of ethereum, then should prompt them an abiPath
-    const selectedFamily = networkTemplates.find((family) => family.name === this.networkFamily);
+    const selectedFamily = networkTemplates.find((family) => family.name === networkFamily);
+    assert(selectedFamily, 'No network family selected');
 
     // Network selection
     const networkStrArr = selectedFamily.networks.map((n) => n.name);
 
-    await inquirer
-      .prompt([
-        {
-          name: 'networkResponse',
-          message: 'Select a network',
-          type: 'autocomplete',
-          searchText: '',
-          emptyText: 'Network not found',
-          pageSize: 20,
-          source: filterInput(networkStrArr),
-        },
-      ])
-      .then(({networkResponse}) => {
-        this.network = networkResponse;
-      });
-    const selectedNetwork = selectedFamily.networks.find((network) => this.network === network.name);
+    const network = await search<string>({
+      message: 'Select a network',
+      source: filterInput(networkStrArr),
+      pageSize: 20,
+    });
+
+    const selectedNetwork = selectedFamily.networks.find((v) => network === v.name);
+    assert(selectedNetwork, 'No network selected');
 
     const candidateProjects = await fetchExampleProjects(selectedFamily.code, selectedNetwork.code);
 
-    let selectedProject: ExampleProjectInterface;
+    let selectedProject: ExampleProjectInterface | undefined;
     // Templates selection
     const paddingWidth = candidateProjects.map(({name}) => name.length).reduce((acc, xs) => Math.max(acc, xs)) + 5;
     const templateDisplays = candidateProjects.map(
       ({description, name}) => `${name.padEnd(paddingWidth, ' ')}${chalk.gray(description)}`
     );
     templateDisplays.push(`${'Other'.padEnd(paddingWidth, ' ')}${chalk.gray('Enter a custom git endpoint')}`);
-    await inquirer
-      .prompt([
-        {
-          name: 'templateDisplay',
-          message: 'Select a template project',
-          type: 'autocomplete',
-          searchText: '',
-          emptyText: 'Template not found',
-          source: filterInput(templateDisplays),
-        },
-      ])
-      .then(async ({templateDisplay}) => {
-        const templateName = (templateDisplay as string).split(' ')[0];
-        if (templateName === 'Other') {
-          await this.cloneCustomRepo();
-        } else {
-          selectedProject = candidateProjects.find((project) => project.name === templateName);
-        }
+
+    const templateDisplay = await search<string>({
+      message: 'Select a template project',
+      source: filterInput(templateDisplays),
+      pageSize: 20,
+    });
+
+    const templateName = (templateDisplay as string).split(' ')[0];
+    if (templateName === 'Other') {
+      const url = await input({
+        message: 'Enter a git repo URL',
+        required: true,
       });
-    this.projectPath = await cloneProjectTemplate(this.location, this.project.name, selectedProject);
 
-    await this.setupProject(flags);
+      selectedProject = {
+        remote: url,
+        name: templateName,
+        path: '',
+        description: '',
+      };
+    } else {
+      selectedProject = candidateProjects.find((project) => project.name === templateName);
+    }
 
-    if (await validateEthereumProjectManifest(this.projectPath)) {
-      const {loadAbi} = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'loadAbi',
-          message: 'Do you want to generate scaffolding from an existing contract abi?',
-          default: false,
-        },
-      ]);
+    assert(selectedProject, 'No project selected');
+    const projectPath: string = await cloneProjectTemplate(location, project.name, selectedProject);
+
+    await this.setupProject(project, projectPath, flags);
+
+    if (await validateEthereumProjectManifest(projectPath)) {
+      const loadAbi = await confirm({
+        message: 'Do you want to generate scaffolding from an existing contract abi?',
+        default: false,
+      });
 
       if (loadAbi) {
-        await this.createProjectScaffold();
+        await this.createProjectScaffold(projectPath);
       }
     }
   }
 
-  async cloneCustomRepo(): Promise<void> {
-    const [gitRemote, gitBranch] = await promptValidRemoteAndBranch();
-    this.projectPath = await cloneProjectGit(this.location, this.project.name, gitRemote, gitBranch);
-  }
+  async setupProject(
+    project: ProjectSpecBase,
+    projectPath: string,
+    flags: {npm: boolean; 'install-dependencies': boolean}
+  ): Promise<void> {
+    const [defaultEndpoint, defaultAuthor, defaultDescription] = await readDefaults(projectPath);
 
-  async setupProject(flags: any): Promise<void> {
-    const [defaultEndpoint, defaultAuthor, defaultDescription] = await readDefaults(this.projectPath);
-
-    this.project.endpoint = !Array.isArray(defaultEndpoint) ? [defaultEndpoint] : defaultEndpoint;
-    const userInput = await cli.prompt('RPC endpoint:', {
+    project.endpoint = !Array.isArray(defaultEndpoint) ? [defaultEndpoint] : defaultEndpoint;
+    const userInput = await input({
+      message: 'RPC endpoint:',
       default: defaultEndpoint[0] ?? 'wss://polkadot.api.onfinality.io/public-ws',
       required: false,
     });
-    if (!this.project.endpoint.includes(userInput)) {
-      (this.project.endpoint as string[]).push(userInput);
+    if (!project.endpoint.includes(userInput)) {
+      (project.endpoint as string[]).push(userInput);
     }
     const descriptionHint = defaultDescription.substring(0, 40).concat('...');
-    this.project.author = await cli.prompt('Author', {required: true, default: defaultAuthor});
-    this.project.description = await cli
-      .prompt('Description', {
-        required: false,
-        default: descriptionHint,
-      })
-      .then((description) => {
-        return description === descriptionHint ? defaultDescription : description;
-      });
+    project.author = await input({message: 'Author', required: true, default: defaultAuthor});
+    project.description = await input({
+      message: 'Description',
+      required: false,
+      default: descriptionHint,
+    }).then((description) => {
+      return description === descriptionHint ? defaultDescription : description;
+    });
 
-    cli.action.start('Preparing project');
-    await prepare(this.projectPath, this.project);
-    cli.action.stop();
+    const spinner = ora('Preparing project').start();
+    await prepare(projectPath, project);
+    spinner.stop();
     if (flags['install-dependencies']) {
-      cli.action.start('Installing dependencies');
-      installDependencies(this.projectPath, flags.npm);
-      cli.action.stop();
+      const spinner = ora('Installing dependencies').start();
+      installDependencies(projectPath, flags.npm);
+      spinner.stop();
     }
-    this.log(`${this.project.name} is ready`);
+    this.log(`${project.name} is ready`);
   }
-  async createProjectScaffold(): Promise<void> {
-    await prepareProjectScaffold(this.projectPath);
 
-    const {abiFilePath} = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'abiFilePath',
-        message: 'Path to ABI',
-      },
-    ]);
+  async createProjectScaffold(projectPath: string): Promise<void> {
+    await prepareProjectScaffold(projectPath);
 
-    const {contractAddress} = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'contractAddress',
-        message: 'Please provide a contract address (optional)',
-      },
-    ]);
+    const abiFilePath = await input({
+      message: 'Path to ABI',
+    });
 
-    const {startBlock} = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'startBlock',
-        message: 'Please provide startBlock when the contract was deployed or first used',
-        default: 1,
-      },
-    ]);
+    const contractAddress = await input({
+      message: 'Please provide a contract address (optional)',
+    });
+
+    const startBlock = await input({
+      message: 'Please provide startBlock when the contract was deployed or first used',
+      default: '1',
+    });
 
     const cleanedContractAddress = contractAddress.replace(/[`'"]/g, '');
 
     this.log(`Generating scaffold handlers and manifest from ${abiFilePath}`);
     await Generate.run([
       '-f',
-      this.projectPath,
+      projectPath,
       '--abiPath',
       `${abiFilePath}`,
       '--address',

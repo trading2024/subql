@@ -3,10 +3,9 @@
 
 import * as fs from 'fs';
 import path from 'path';
-import {promisify} from 'util';
 import {makeTempDir} from '@subql/common';
 import {copySync} from 'fs-extra';
-import rimraf from 'rimraf';
+import {rimraf} from 'rimraf';
 import git from 'simple-git';
 import {parseDocument, Document} from 'yaml';
 import {isProjectSpecV0_2_0, isProjectSpecV1_0_0, ProjectSpecBase} from '../types';
@@ -111,26 +110,22 @@ describe('Cli can create project', () => {
     expect(output.new).not.toEqual(output.old);
     expect(output.new.toString()).toContain('# The genesis hash of the network (hash of block 0)');
 
-    await promisify(rimraf)(localPath);
+    await rimraf(localPath);
   });
 
   it('prepare correctly applies project details', async () => {
     const tempPath = await makeTempDir();
     const projects = await fetchExampleProjects('polkadot', 'polkadot');
-    const projectPath = await cloneProjectTemplate(
-      tempPath,
-      projectSpec.name,
-      projects.find((p) => p.name === 'Polkadot-starter')
-    );
+    const project = projects.find((p) => p.name === 'Polkadot-starter')!;
+    const projectPath = await cloneProjectTemplate(tempPath, projectSpec.name, project);
     await prepare(projectPath, projectSpec);
-    const [endpoint, author, description] = await readDefaults(projectPath);
+    const [, author, description] = await readDefaults(projectPath);
 
     //spec version is  not returned from readDefaults
     //expect(projectSpec.specVersion).toEqual(specVersion);
-    expect(projectSpec.endpoint).toEqual(endpoint);
     expect(projectSpec.author).toEqual(author);
     expect(projectSpec.description).toEqual(description);
-    await promisify(rimraf)(tempPath);
+    await rimraf(tempPath);
   });
 
   it('allow git from sub directory', async () => {

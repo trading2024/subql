@@ -4,7 +4,8 @@
 import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
-import {getFileContent, loadFromJsonOrYaml} from '@subql/common';
+import {getFileContent, loadFromJsonOrYaml, normalizeNetworkEndpoints} from '@subql/common';
+import {IEndpointConfig} from '@subql/types-core';
 import {last} from 'lodash';
 import {LevelWithSilent} from 'pino';
 import {getLogger} from '../logger';
@@ -21,8 +22,8 @@ export interface IConfig {
   readonly blockTime: number;
   readonly debug?: string;
   readonly preferRange: boolean;
-  readonly networkEndpoint?: string[];
-  readonly primaryNetworkEndpoint?: string;
+  readonly networkEndpoint?: Record<string, IEndpointConfig>;
+  readonly primaryNetworkEndpoint?: [string, IEndpointConfig];
   readonly networkDictionary?: string[];
   readonly dictionaryRegistry: string;
   readonly outputFmt?: 'json';
@@ -53,6 +54,8 @@ export interface IConfig {
   readonly root?: string;
   readonly allowSchemaMigration: boolean;
   readonly csvOutDir?: string;
+  readonly monitorOutDir: string;
+  readonly monitorFileSize?: number;
 }
 
 export type MinConfig = Partial<Omit<IConfig, 'subquery'>> & Pick<IConfig, 'subquery'>;
@@ -80,6 +83,7 @@ const DEFAULT_CONFIG = {
   storeCacheAsync: true,
   storeFlushInterval: 5,
   allowSchemaMigration: false,
+  monitorOutDir: './.monitor',
 };
 
 export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
@@ -130,14 +134,18 @@ export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
     return this._config.batchSize;
   }
 
-  get networkEndpoints(): string[] | undefined {
-    return typeof this._config.networkEndpoint === 'string'
-      ? [this._config.networkEndpoint]
-      : this._config.networkEndpoint;
+  get networkEndpoints(): Record<string, IEndpointConfig> | undefined {
+    return normalizeNetworkEndpoints(
+      this._config.networkEndpoint as string | string[] | Record<string, IEndpointConfig>
+    );
   }
 
-  get primaryNetworkEndpoint(): string | undefined {
+  get primaryNetworkEndpoint(): [string, IEndpointConfig] | undefined {
     return this._config.primaryNetworkEndpoint;
+    // if (!this._config.primaryNetworkEndpoint) {
+    //   return undefined;
+    // }
+    // return [this._config.primaryNetworkEndpoint, {}];
   }
 
   get networkDictionaries(): string[] | undefined | false {
@@ -307,6 +315,17 @@ export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
 
   get csvOutDir(): string | undefined {
     return this._config.csvOutDir;
+  }
+
+  get monitorOutDir(): string {
+    return this._config.monitorOutDir;
+  }
+
+  get monitorFileSize(): number {
+    const defaultMonitorFileSize = 200;
+    // If user passed though yarg, we will record monitor file by this size, no matter poi or not
+    // if user didn't pass through yarg, we will record monitor file by this default size only when poi is enabled
+    return this._config.monitorFileSize ?? this._config.proofOfIndex ? defaultMonitorFileSize : 0;
   }
 
   merge(config: Partial<IConfig>): this {

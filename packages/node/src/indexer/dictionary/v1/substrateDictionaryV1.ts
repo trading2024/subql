@@ -1,6 +1,7 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import { gql } from '@apollo/client/core';
 import {
   isCustomDs,
@@ -18,26 +19,29 @@ import { SubstrateBlockFilter, SubstrateDatasource } from '@subql/types';
 import {
   DictionaryQueryCondition,
   DictionaryQueryEntry as DictionaryV1QueryEntry,
-  DsProcessor,
 } from '@subql/types-core';
 import { buildQuery, GqlNode, GqlQuery } from '@subql/utils';
 import { sortBy, uniqBy } from 'lodash';
 import { SubqueryProject } from '../../../configure/SubqueryProject';
 import { isBaseHandler, isCustomHandler } from '../../../utils/project';
+import { DsProcessorService } from '../../ds-processor.service';
 import { SpecVersion, SpecVersionDictionary } from '../types';
+
+type GetDsProcessor = DsProcessorService['getDsProcessor'];
 
 function eventFilterToQueryEntry(
   filter: SubstrateEventFilter,
 ): DictionaryV1QueryEntry {
+  const conditions: DictionaryQueryCondition[] = [];
+  if (filter.method) {
+    conditions.push({ field: 'event', value: filter.method });
+  }
+  if (filter.module) {
+    conditions.push({ field: 'module', value: filter.module });
+  }
   return {
     entity: 'events',
-    conditions: [
-      { field: 'module', value: filter.module },
-      {
-        field: 'event',
-        value: filter.method,
-      },
-    ],
+    conditions,
   };
 }
 
@@ -46,23 +50,23 @@ function callFilterToQueryEntry(
 ): DictionaryV1QueryEntry {
   return {
     entity: 'extrinsics',
-    conditions: Object.keys(filter).map(
-      (key) =>
-        ({
-          field: key === 'method' ? 'call' : key,
-          value: filter[key],
-        } as DictionaryQueryCondition),
-    ),
+    conditions: Object.keys(filter)
+      .map(
+        (key) =>
+          ({
+            field: key === 'method' ? 'call' : key,
+            value: filter[key as keyof SubstrateCallFilter],
+          }) as DictionaryQueryCondition,
+      )
+      .filter((c) => c.value !== undefined),
   };
 }
 
-function getBaseHandlerKind<
-  P extends DsProcessor<SubstrateDatasource> = DsProcessor<SubstrateDatasource>,
->(
+function getBaseHandlerKind(
   ds: SubstrateDataSource,
   handler: SubstrateHandler,
-  getDsProcessor: (ds: SubstrateDatasource) => P,
-): SubstrateHandlerKind {
+  getDsProcessor: GetDsProcessor,
+): SubstrateHandlerKind | undefined {
   if (isRuntimeDs(ds) && isBaseHandler(handler)) {
     return handler.kind;
   } else if (isCustomDs(ds) && isCustomHandler(handler)) {
@@ -77,13 +81,10 @@ function getBaseHandlerKind<
   }
 }
 
-function getBaseHandlerFilters<
-  T extends SubstrateRuntimeHandlerFilter,
-  P extends DsProcessor<SubstrateDatasource> = DsProcessor<SubstrateDatasource>,
->(
+function getBaseHandlerFilters<T extends SubstrateRuntimeHandlerFilter>(
   ds: SubstrateDataSource,
   handlerKind: string,
-  getDsProcessor: (ds: SubstrateDatasource) => P,
+  getDsProcessor: GetDsProcessor,
 ): T[] {
   if (isCustomDs(ds)) {
     const plugin = getDsProcessor(ds);
@@ -97,11 +98,9 @@ function getBaseHandlerFilters<
 }
 
 // eslint-disable-next-line complexity
-export function buildDictionaryV1QueryEntries<
-  P extends DsProcessor<SubstrateDatasource> = DsProcessor<SubstrateDatasource>,
->(
+export function buildDictionaryV1QueryEntries(
   dataSources: SubstrateDatasource[],
-  getDsProcessor: (ds: SubstrateDatasource) => P,
+  getDsProcessor: GetDsProcessor,
 ): DictionaryV1QueryEntry[] {
   const queryEntries: DictionaryV1QueryEntry[] = [];
 
@@ -109,14 +108,13 @@ export function buildDictionaryV1QueryEntries<
     const plugin = isCustomDs(ds) ? getDsProcessor(ds) : undefined;
     for (const handler of ds.mapping.handlers) {
       const baseHandlerKind = getBaseHandlerKind(ds, handler, getDsProcessor);
-      let filterList: SubstrateRuntimeHandlerFilter[];
+      let filterList: SubstrateRuntimeHandlerFilter[] = [];
       if (isCustomDs(ds)) {
+        assert(plugin, 'plugin should be defined');
         const processor = plugin.handlerProcessors[handler.kind];
-        if (processor.dictionaryQuery) {
-          const queryEntry = processor.dictionaryQuery(
-            (handler as SubstrateCustomHandler).filter,
-            ds,
-          );
+        const filter = (handler as SubstrateCustomHandler).filter;
+        if (processor.dictionaryQuery && filter) {
+          const queryEntry = processor.dictionaryQuery(filter, ds);
           if (queryEntry) {
             queryEntries.push(queryEntry);
             continue;
@@ -127,7 +125,7 @@ export function buildDictionaryV1QueryEntries<
           handler.kind,
           getDsProcessor,
         );
-      } else {
+      } else if (handler.filter) {
         filterList = [handler.filter];
       }
       // Filter out any undefined
@@ -166,7 +164,9 @@ export function buildDictionaryV1QueryEntries<
           }
           break;
         }
-        default:
+        default: {
+          throw new Error(`Unsupported handler kind: ${baseHandlerKind}`);
+        }
       }
     }
   }
@@ -186,10 +186,8 @@ export class SubstrateDictionaryV1 extends DictionaryV1<SubstrateDataSource> {
   constructor(
     project: SubqueryProject,
     nodeConfig: NodeConfig,
-    protected getDsProcessor: (
-      ds: SubstrateDatasource,
-    ) => DsProcessor<SubstrateDatasource>,
-    dictionaryUrl?: string,
+    protected getDsProcessor: GetDsProcessor,
+    dictionaryUrl: string,
     chainId?: string,
   ) {
     super(dictionaryUrl, chainId ?? project.network.chainId, nodeConfig);
@@ -198,10 +196,8 @@ export class SubstrateDictionaryV1 extends DictionaryV1<SubstrateDataSource> {
   static async create(
     project: SubqueryProject,
     nodeConfig: NodeConfig,
-    getDsProcessor: (
-      ds: SubstrateDatasource,
-    ) => DsProcessor<SubstrateDatasource>,
-    dictionaryUrl?: string,
+    getDsProcessor: GetDsProcessor,
+    dictionaryUrl: string,
     chainId?: string,
   ): Promise<SubstrateDictionaryV1> {
     const dictionary = new SubstrateDictionaryV1(
@@ -221,7 +217,7 @@ export class SubstrateDictionaryV1 extends DictionaryV1<SubstrateDataSource> {
     return buildDictionaryV1QueryEntries(dataSources, this.getDsProcessor);
   }
 
-  parseSpecVersions(raw: SpecVersionDictionary): SpecVersion[] {
+  parseSpecVersions(raw?: SpecVersionDictionary): SpecVersion[] {
     if (raw === undefined) {
       return [];
     }
@@ -250,7 +246,7 @@ export class SubstrateDictionaryV1 extends DictionaryV1<SubstrateDataSource> {
     return Array.from(specVersionBlockHeightSet);
   }
 
-  async getSpecVersionsRaw(): Promise<SpecVersionDictionary> {
+  async getSpecVersionsRaw(): Promise<SpecVersionDictionary | undefined> {
     const { query } = this.specVersionQuery();
     try {
       const resp = await timeout(
@@ -263,13 +259,13 @@ export class SubstrateDictionaryV1 extends DictionaryV1<SubstrateDataSource> {
       const _metadata = resp.data._metadata;
       const specVersions = resp.data.specVersions;
       return { _metadata, specVersions };
-    } catch (err) {
+    } catch (err: any) {
       logger.warn(err, `failed to fetch specVersion result`);
       return undefined;
     }
   }
 
-  async getSpecVersions(): Promise<SpecVersion[]> {
+  async getSpecVersions(): Promise<SpecVersion[] | undefined> {
     try {
       return this.parseSpecVersions(await this.getSpecVersionsRaw());
     } catch {

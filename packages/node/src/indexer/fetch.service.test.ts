@@ -1,20 +1,21 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import { ApiPromise, WsProvider } from '@polkadot/api';
+import { ApiPromise, HttpProvider } from '@polkadot/api';
 import { ApiService } from './api.service';
 import { FetchService } from './fetch.service';
 import { createCachedProvider } from './x-provider/cachedProvider';
 
-const WS_POLKADOT_ENDPOINT = 'wss://rpc.polkadot.io';
+const POLKADOT_ENDPOINT = 'https://rpc.polkadot.io';
 
 describe('FetchService', () => {
   let fetchService: FetchService;
   let api: ApiPromise;
 
   beforeAll(async () => {
+    // Use HTTP where possible to avoid cleanup issues
     api = await ApiPromise.create({
-      provider: createCachedProvider(new WsProvider(WS_POLKADOT_ENDPOINT)),
+      provider: createCachedProvider(new HttpProvider(POLKADOT_ENDPOINT)),
     });
 
     const apiService = {
@@ -23,19 +24,19 @@ describe('FetchService', () => {
 
     fetchService = new FetchService(
       apiService, // ApiService
-      null, // NodeConfig
-      null, // ProjectService
-      {} as any, // Project
-      null, // BlockDispatcher,
-      null, // DictionaryService
+      null as any, // NodeConfig
+      null as any, // ProjectService
+      null as any, // BlockDispatcher,
+      null as any, // DictionaryService
       {
         registerFinalizedBlock: () => {
           /* Nothing */
         },
       } as any, // UnfinalizedBlocks
-      null, // EventEmitter
-      null, // SchedulerRegistry
-      null, // RuntimeService
+      null as any, // EventEmitter
+      null as any, // SchedulerRegistry
+      null as any, // RuntimeService
+      null as any, // StoreCacheService
     ) as any;
   }, 10000);
 
@@ -44,8 +45,8 @@ describe('FetchService', () => {
   });
 
   it('can get the finalized height', async () => {
-    const height = await (fetchService as any).getFinalizedHeight();
-    expect(height).toBeGreaterThan(0);
+    const header = await (fetchService as any).getFinalizedHeader();
+    expect(header.blockHeight).toBeGreaterThan(0);
   });
 
   it('can get the best height', async () => {

@@ -1,10 +1,15 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiPromise } from '@polkadot/api';
-import { RpcMethodResult } from '@polkadot/api/types';
+import {
+  ApiTypes,
+  DecoratedRpcSection,
+  RpcMethodResult,
+} from '@polkadot/api/types';
 import { RuntimeVersion, Header } from '@polkadot/types/interfaces';
 import {
   AnyFunction,
@@ -21,7 +26,10 @@ import {
   ApiService as BaseApiService,
   IBlock,
   MetadataMismatchError,
+  exitWithError,
 } from '@subql/node-core';
+import { SubstrateNetworkConfig } from '@subql/types';
+import { IEndpointConfig } from '@subql/types-core';
 import { SubstrateNodeConfig } from '../configure/NodeConfig';
 import { SubqueryProject } from '../configure/SubqueryProject';
 import { isOnlyEventHandlers } from '../utils/project';
@@ -63,8 +71,9 @@ async function dynamicImportHasher(
   methodName: string,
 ): Promise<(data: Uint8Array) => Uint8Array> {
   const module = await import('@polkadot/util-crypto');
-  if (module[methodName]) {
-    return module[methodName];
+  const method = module[methodName as keyof typeof module];
+  if (method) {
+    return method as (data: Uint8Array) => Uint8Array;
   } else {
     throw new Error(
       `Hasher Method ${methodName} not found in @polkadot/util-crypto`,
@@ -100,14 +109,16 @@ export class ApiService
   extends BaseApiService<
     ApiPromise,
     ApiAt,
-    IBlock<BlockContent>[] | IBlock<LightBlockContent>[]
+    IBlock<BlockContent>[] | IBlock<LightBlockContent>[],
+    ApiPromiseConnection,
+    IEndpointConfig
   >
   implements OnApplicationShutdown
 {
-  private fetchBlocksFunction: FetchFunc;
+  private _fetchBlocksFunction?: FetchFunc;
   private fetchBlocksBatches: GetFetchFunc = () => this.fetchBlocksFunction;
-  private currentBlockHash: string;
-  private currentBlockNumber: number;
+  private _currentBlockHash?: string;
+  private _currentBlockNumber?: number;
 
   private nodeConfig: SubstrateNodeConfig;
 
@@ -123,23 +134,48 @@ export class ApiService
     this.updateBlockFetching();
   }
 
+  private get fetchBlocksFunction(): FetchFunc {
+    assert(this._fetchBlocksFunction, 'fetchBlocksFunction not initialized');
+    return this._fetchBlocksFunction;
+  }
+
+  private get currentBlockHash(): string {
+    assert(this._currentBlockHash, 'currentBlockHash not initialized');
+    return this._currentBlockHash;
+  }
+
+  private set currentBlockHash(value: string) {
+    this._currentBlockHash = value;
+  }
+
+  private get currentBlockNumber(): number {
+    assert(this._currentBlockNumber, 'currentBlockNumber not initialized');
+    return this._currentBlockNumber;
+  }
+
+  private set currentBlockNumber(value: number) {
+    this._currentBlockNumber = value;
+  }
+
   async onApplicationShutdown(): Promise<void> {
     await this.connectionPoolService.onApplicationShutdown();
   }
 
   async init(): Promise<ApiService> {
     overrideConsoleWarn();
-    let chainTypes, network;
+    let chainTypes: RegisteredTypes | undefined;
+    let network: SubstrateNetworkConfig;
     try {
       chainTypes = await updateChainTypesHasher(this.project.chainTypes);
       network = this.project.network;
 
       if (this.nodeConfig.primaryNetworkEndpoint) {
-        network.endpoint.push(this.nodeConfig.primaryNetworkEndpoint);
+        const [endpoint, config] = this.nodeConfig.primaryNetworkEndpoint;
+        (network.endpoint as Record<string, IEndpointConfig>)[endpoint] =
+          config;
       }
     } catch (e) {
-      logger.error(e);
-      process.exit(1);
+      exitWithError(new Error(`Failed to init api`, { cause: e }), logger);
     }
 
     if (chainTypes) {
@@ -149,10 +185,15 @@ export class ApiService
     await this.createConnections(
       network,
       //createConnection
-      (endpoint) =>
-        ApiPromiseConnection.create(endpoint, this.fetchBlocksBatches, {
-          chainTypes,
-        }),
+      (endpoint, config) =>
+        ApiPromiseConnection.create(
+          endpoint,
+          this.fetchBlocksBatches,
+          {
+            chainTypes,
+          },
+          config,
+        ),
       //postConnectedHook
       (connection: ApiPromiseConnection, endpoint: string, index: number) => {
         const api = connection.unsafeApi;
@@ -172,8 +213,12 @@ export class ApiService
         });
       },
     );
-
     return this;
+  }
+
+  async updateChainTypes(): Promise<void> {
+    const chainTypes = await updateChainTypesHasher(this.project.chainTypes);
+    await this.connectionPoolService.updateChainTypes(chainTypes);
   }
 
   updateBlockFetching(): void {
@@ -206,13 +251,13 @@ export class ApiService
       : SubstrateUtil.fetchBlocksBatches;
 
     if (this.nodeConfig?.profiler) {
-      this.fetchBlocksFunction = profilerWrap(
+      this._fetchBlocksFunction = profilerWrap(
         fetchFunc,
         'SubstrateUtil',
         'fetchBlocksBatches',
       );
     } else {
-      this.fetchBlocksFunction = fetchFunc;
+      this._fetchBlocksFunction = fetchFunc;
     }
   }
 
@@ -222,7 +267,7 @@ export class ApiService
 
   async getPatchedApi(
     header: Header,
-    runtimeVersion: RuntimeVersion,
+    runtimeVersion?: RuntimeVersion,
   ): Promise<ApiAt> {
     this.currentBlockHash = header.hash.toString();
     this.currentBlockNumber = header.number.toNumber();
@@ -236,7 +281,7 @@ export class ApiService
     return apiAt;
   }
 
-  private redecorateRpcFunction<T extends 'promise' | 'rxjs'>(
+  private redecorateRpcFunction<T extends ApiTypes>(
     original: RpcMethodResult<T, AnyFunction>,
   ): RpcMethodResult<T, AnyFunction> {
     const methodName = this.getRPCFunctionName(original);
@@ -294,19 +339,27 @@ export class ApiService
     return ret;
   }
 
-  private patchApiRpc(api: ApiPromise, apiAt: ApiAt): void {
-    apiAt.rpc = Object.entries(api.rpc).reduce((acc, [module, rpcMethods]) => {
-      acc[module] = Object.entries(rpcMethods).reduce(
-        (accInner, [name, rpcPromiseResult]) => {
-          accInner[name] = this.redecorateRpcFunction(
-            rpcPromiseResult as RpcMethodResult<any, AnyFunction>,
-          );
-          return accInner;
-        },
-        {},
-      );
-      return acc;
-    }, {} as ApiPromise['rpc']);
+  private patchApiRpc<T extends ApiTypes = 'promise'>(
+    api: ApiPromise,
+    apiAt: ApiAt,
+  ): void {
+    apiAt.rpc = Object.entries(api.rpc).reduce(
+      (acc, [module, rpcMethods]) => {
+        acc[module as keyof ApiPromise['rpc']] = Object.entries(
+          rpcMethods,
+        ).reduce(
+          (accInner, [name, rpcPromiseResult]) => {
+            accInner[name] = this.redecorateRpcFunction<T>(
+              rpcPromiseResult as RpcMethodResult<T, AnyFunction>,
+            );
+            return accInner;
+          },
+          {} as DecoratedRpcSection<T, any>,
+        ) as any;
+        return acc;
+      },
+      {} as ApiPromise['rpc'],
+    );
   }
 
   private getRPCFunctionName<T extends 'promise' | 'rxjs'>(
@@ -322,7 +375,7 @@ export class ApiService
     heights: number[],
     overallSpecVer?: number,
     numAttempts = MAX_RECONNECT_ATTEMPTS,
-  ): Promise<IBlock<LightBlockContent>[]> {
+  ): Promise<IBlock<LightBlockContent>[] | IBlock<BlockContent>[]> {
     return this.retryFetch(async () => {
       // Get the latest fetch function from the provider
       const apiInstance = this.connectionPoolService.api;

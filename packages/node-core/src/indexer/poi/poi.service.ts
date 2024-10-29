@@ -1,12 +1,15 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import {Inject, Injectable, OnApplicationShutdown} from '@nestjs/common';
+import {Injectable, OnApplicationShutdown} from '@nestjs/common';
+import {u8aToHex} from '@subql/utils';
 import {Op, QueryTypes, Transaction} from '@subql/x-sequelize';
 import {NodeConfig} from '../../configure';
 import {sqlIterator} from '../../db';
 import {getLogger} from '../../logger';
 import {PoiRepo} from '../entities';
+import {ProofOfIndex, ProofOfIndexHuman, SyncedProofOfIndex} from '../entities/Poi.entity';
+import {PlainPoiModel} from '../poi';
 import {StoreCacheService} from '../storeCache';
 import {CachePoiModel} from '../storeCache/cachePoi';
 
@@ -22,10 +25,23 @@ export class PoiService implements OnApplicationShutdown {
   private isShutdown = false;
   private _poiRepo?: CachePoiModel;
 
-  constructor(protected readonly nodeConfig: NodeConfig, private storeCache: StoreCacheService) {}
+  constructor(
+    protected readonly nodeConfig: NodeConfig,
+    private storeCache: StoreCacheService
+  ) {}
 
   onApplicationShutdown(): void {
     this.isShutdown = true;
+  }
+
+  static PoiToHuman(proofOfIndex: ProofOfIndex | SyncedProofOfIndex): ProofOfIndexHuman {
+    return {
+      ...proofOfIndex,
+      parentHash: proofOfIndex.parentHash ? u8aToHex(proofOfIndex.parentHash) : undefined,
+      hash: proofOfIndex.hash ? u8aToHex(proofOfIndex.hash) : undefined,
+      chainBlockHash: proofOfIndex.chainBlockHash ? u8aToHex(proofOfIndex.chainBlockHash) : undefined,
+      operationHashRoot: proofOfIndex.operationHashRoot ? u8aToHex(proofOfIndex.operationHashRoot) : undefined,
+    };
   }
 
   get poiRepo(): CachePoiModel {
@@ -33,6 +49,10 @@ export class PoiService implements OnApplicationShutdown {
       throw new Error(`No poi repo inited`);
     }
     return this._poiRepo;
+  }
+
+  get plainPoiRepo(): PlainPoiModel {
+    return this.poiRepo.plainPoiModel;
   }
 
   /**
@@ -76,7 +96,7 @@ export class PoiService implements OnApplicationShutdown {
       // Drop previous keys in metadata
       this.storeCache.metadata.bulkRemove(['blockOffset', 'latestPoiWithMmr', 'lastPoiHeight']);
 
-      const queries = [];
+      const queries: string[] = [];
 
       if (checkResult) {
         if (checkResult.mmr_exists) {

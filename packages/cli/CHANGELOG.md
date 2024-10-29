@@ -6,6 +6,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.3.0] - 2024-10-21
+### Changed
+- Improve codegen error messages (#2567)
+- Update codegen to match changes to store interface making options.limit required on getByField(s) methods (#2567)
+
+## [5.2.8] - 2024-09-25
+### Changed
+- Bump common, Added manifest support for query-subgraph.
+
+## [5.2.7] - 2024-09-16
+### Fixed
+- deployment command minor issues (#2542)
+
+### Removed
+- deprecated cli-ux dependency, switched to using inquirer and ora (#2542)
+
+## [5.2.6] - 2024-09-09
+### Changed
+- Bump webpack from 5.93.0 to 5.94.0
+
+## [5.2.4] - 2024-08-23
+### Fixed
+- Fix migrate schema missing conversion for `Bytes` and `BigDecimal` type (#2538)
+
+## [5.2.3] - 2024-08-14
+### Fixed
+- Supports subgraph migration `kind: ethereum`.
+
+## [5.2.2] - 2024-08-14
+### Added
+- fix case sensitive import for schema entities in codegen (#2211)
+
+### Fixed
+- Glob sync issue (#2534)
+
+## [5.2.1] - 2024-08-12
+### Changed
+- Default deployment type to SubQuery when deploying to the managed service (#2523).
+
+## [5.2.0] - 2024-08-05
+### Changed
+- Update inquirer dependencies (#2501)
+- Improve endpoint type to be based on core type (#2511)
+- Update dependencies (#2518)
+
+### Fixed
+- Not being able to select a custom repo when initializing a project (#2501)
+
+### Added
+- Subgraph graphql schema migration to the migrate command (#2499)
+
+## [5.1.1] - 2024-07-25
+### Changed
+- Bump versions with `@subql/common` and `@subql/utils` (#2498)
+
+## [5.1.0] - 2024-07-11
+### Changed
+- Use `IPFSHTTPClientLite` replace `IPFSHTTPClient` (#2480)
+
+## [5.0.1] - 2024-07-09
+### Changed
+- Changes to ts build settings (#2475)
+
+## [5.0.0] - 2024-07-04
+### Added
+- Enable ts strict mode
+
+### Fixed
+- The IPFS CID for multi-chain requires the directory CID.
+
+### Changed
+- Breaking Change: Removed common network packages from dependencies, only import required module from local/global when using. (#2456)
+
+## [4.15.0] - 2024-06-21
+### Changed
+- Update `@subql/utils`, `@subql/common` and other dependencies
+
+## [4.14.0] - 2024-06-18
+### Removed
+- Deprecated flare SDK (#2428)
+
+## [4.13.1] - 2024-06-12
+### Changed
+- Update `@subql/utils`
+
+## [4.13.0] - 2024-06-12
+### Changed
+- Improve logging and error handling for multichain deploy (#2434)
+
+### Fixed
+- Add missing networks for migration
+- Fixed init command path issue
+- Update common-ethereum to fix issue with ABI validation (#2435)
+
+## [4.12.0] - 2024-06-05
+### Changed
+- Bump with common dependencies
+
 ## [4.11.0] - 2024-05-30
 ### Added
 - `--queryLimit` flag to deploy command for query service (#2419)
@@ -589,7 +687,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - support subcommand codegen
 - support subcommand init
 
-[Unreleased]: https://github.com/subquery/subql/compare/cli/4.11.0...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/cli/5.3.0...HEAD
+[5.3.0]: https://github.com/subquery/subql/compare/cli/5.2.8...cli/5.3.0
+[5.2.8]: https://github.com/subquery/subql/compare/cli/5.2.7...cli/5.2.8
+[5.2.7]: https://github.com/subquery/subql/compare/cli/5.2.6...cli/5.2.7
+[5.2.6]: https://github.com/subquery/subql/compare/cli/5.2.4...cli/5.2.6
+[5.2.4]: https://github.com/subquery/subql/compare/cli/5.2.3...cli/5.2.4
+[5.2.3]: https://github.com/subquery/subql/compare/cli/5.2.2...cli/5.2.3
+[5.2.2]: https://github.com/subquery/subql/compare/cli/5.2.1...cli/5.2.2
+[5.2.1]: https://github.com/subquery/subql/compare/cli/5.2.0...cli/5.2.1
+[5.2.0]: https://github.com/subquery/subql/compare/cli/5.1.1...cli/5.2.0
+[5.1.1]: https://github.com/subquery/subql/compare/cli/5.1.0...cli/5.1.1
+[5.1.0]: https://github.com/subquery/subql/compare/cli/5.0.1...cli/5.1.0
+[5.0.1]: https://github.com/subquery/subql/compare/cli/5.0.0...cli/5.0.1
+[5.0.0]: https://github.com/subquery/subql/compare/cli/4.15.0...cli/5.0.0
+[4.15.0]: https://github.com/subquery/subql/compare/cli/4.14.0...cli/4.15.0
+[4.14.0]: https://github.com/subquery/subql/compare/cli/4.13.1...cli/4.14.0
+[4.13.1]: https://github.com/subquery/subql/compare/cli/4.13.0...cli/4.13.1
+[4.13.0]: https://github.com/subquery/subql/compare/cli/4.12.0...cli/4.13.0
+[4.12.0]: https://github.com/subquery/subql/compare/cli/4.11.0...cli/4.12.0
 [4.11.0]: https://github.com/subquery/subql/compare/cli/4.10.1...cli/4.11.0
 [4.10.1]: https://github.com/subquery/subql/compare/cli/4.10.0...cli/4.10.1
 [4.10.0]: https://github.com/subquery/subql/compare/cli/4.9.0...cli/4.10.0

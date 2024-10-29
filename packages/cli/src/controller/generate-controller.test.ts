@@ -3,14 +3,14 @@
 
 import fs from 'fs';
 import path from 'path';
-import {promisify} from 'util';
 import {EventFragment, FunctionFragment} from '@ethersproject/abi';
-import {DEFAULT_TS_MANIFEST, loadFromJsonOrYaml} from '@subql/common';
+import {DEFAULT_TS_MANIFEST, loadFromJsonOrYaml, NETWORK_FAMILY} from '@subql/common';
+import {getAbiInterface} from '@subql/common-ethereum';
 import {SubqlRuntimeDatasource as EthereumDs} from '@subql/types-ethereum';
-import rimraf from 'rimraf';
-import {parseContractPath} from 'typechain';
+import {rimraf} from 'rimraf';
 import {Document, stringify} from 'yaml';
 import Generate, {SelectedMethod, UserInput} from '../commands/codegen/generate';
+import {loadDependency} from '../modulars';
 import {
   constructMethod,
   filterExistingMethods,
@@ -19,7 +19,6 @@ import {
   generateHandlers,
   generateManifestTs,
   generateManifestYaml,
-  getAbiInterface,
   getManifestData,
   prepareAbiDirectory,
   prepareInputFragments,
@@ -160,7 +159,8 @@ const originalManifestData2 = {
   ],
 };
 
-const abiName = parseContractPath('./erc721.json').name;
+const ethModule = loadDependency(NETWORK_FAMILY.ethereum);
+const abiName = ethModule.parseContractPath('./erc721.json').name;
 
 const mockUserInput: UserInput = {
   startBlock: 1,
@@ -175,9 +175,9 @@ jest.setTimeout(30000);
 describe('CLI codegen:generate, Can write to file', () => {
   afterEach(async () => {
     await Promise.all([
-      promisify(rimraf)(path.join(__dirname, '../../test/schemaTest/src')),
-      promisify(rimraf)(path.join(__dirname, '../../test/schemaTest/abis/abis.json')),
-      promisify(rimraf)(path.join(__dirname, '../../test/ts-manifest/mock-project.ts')),
+      rimraf(path.join(__dirname, '../../test/schemaTest/src')),
+      rimraf(path.join(__dirname, '../../test/schemaTest/abis/abis.json')),
+      rimraf(path.join(__dirname, '../../test/ts-manifest/mock-project.ts')),
       fs.promises.writeFile(path.join(PROJECT_PATH, MANIFEST_PATH), stringify(originalManifestData), {
         encoding: 'utf8',
         flag: 'w',

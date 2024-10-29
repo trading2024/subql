@@ -1,11 +1,15 @@
 // Copyright 2020-2024 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import {handleCreateSubqueryProjectError, LocalReader, makeTempDir, ReaderFactory} from '@subql/common';
-import {Reader} from '@subql/types-core';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import {handleCreateSubqueryProjectError, IPFSReader, LocalReader, makeTempDir, ReaderFactory} from '@subql/common';
+import {IEndpointConfig, Reader} from '@subql/types-core';
 import {camelCase, isNil, omitBy} from 'lodash';
 import {ISubqueryProject} from '../indexer';
 import {getLogger, setDebugFilter} from '../logger';
+import {exitWithError} from '../process';
 import {defaultSubqueryName, rebaseArgsWithManifest} from '../utils';
 import {IConfig, NodeConfig} from './NodeConfig';
 import {IProjectUpgradeService, ProjectUpgradeService, upgradableSubqueryProject} from './ProjectUpgrade.service';
@@ -37,7 +41,14 @@ export function validDbSchemaName(name: string): boolean {
 // TODO once yargs is in node core we can update
 type Args = Record<string, any>; // typeof yargsOptions.argv['argv']
 
-function yargsToIConfig(yargs: Args, nameMapping: Record<string, string> = {}): Partial<IConfig> {
+function processEndpointConfig(raw?: string | string[]): IEndpointConfig[] {
+  if (!raw) return [];
+  if (typeof raw === 'string') return [JSON.parse(raw)];
+  if (Array.isArray(raw)) return raw.map((raw) => JSON.parse(raw));
+  throw new Error(`Unknown raw value, received: ${raw}`);
+}
+
+export function yargsToIConfig(yargs: Args, nameMapping: Record<string, string> = {}): Partial<IConfig> {
   return Object.entries(yargs).reduce((acc, [key, value]) => {
     if (['_', '$0'].includes(key)) return acc;
 
@@ -48,6 +59,26 @@ function yargsToIConfig(yargs: Args, nameMapping: Record<string, string> = {}): 
         throw new Error('Argument `network-registry` is not valid JSON');
       }
     }
+
+    // Merge network endpoints and possible endpoint configs
+    if (key === 'network-endpoint') {
+      const endpointConfig = processEndpointConfig(yargs['network-endpoint-config']);
+      if (typeof value === 'string') {
+        value = [value];
+      }
+      if (Array.isArray(value)) {
+        value = value.reduce((acc, endpoint, index) => {
+          acc[endpoint] = endpointConfig[index] ?? {};
+          return acc;
+        }, {} as Record<string, IEndpointConfig>);
+      }
+    }
+    if (key === 'primary-network-endpoint') {
+      const endpointConfig = processEndpointConfig(yargs['primary-network-endpoint-config']);
+      value = [value, endpointConfig[0] ?? {}];
+    }
+    if (['network-endpoint-config', 'primary-network-endpoint-config'].includes(key)) return acc;
+
     acc[nameMapping[key] ?? camelCase(key)] = value;
     return acc;
   }, {} as any);
@@ -64,7 +95,17 @@ let rootDir: string;
 async function getCachedRoot(reader: Reader, configRoot?: string): Promise<string> {
   if (reader instanceof LocalReader) return reader.root;
 
+  // Case for in workers when the parent has decided the directory
   if (configRoot) return configRoot;
+
+  // Allows reusing the same directory on restarts when project is run from ipfs, this can stop duplicating files in the tmp dir
+  if (reader instanceof IPFSReader) {
+    rootDir = path.resolve(os.tmpdir(), reader.cid);
+    if (!fs.existsSync(rootDir)) {
+      await fs.promises.mkdir(rootDir);
+    }
+    return rootDir;
+  }
 
   if (!rootDir) {
     rootDir = await makeTempDir();
@@ -106,9 +147,8 @@ export async function registerApp<P extends ISubqueryProject>(
     config = NodeConfig.rebaseWithArgs(config, yargsToIConfig(argv, nameMapping));
   } else {
     if (!argv.subquery) {
-      logger.error('Subquery path is missing in both cli options and config file');
       showHelp();
-      process.exit(1);
+      exitWithError('Subquery path is missing in both cli options and config file', logger, 1);
     }
 
     warnDeprecations(argv);
@@ -122,28 +162,33 @@ export async function registerApp<P extends ISubqueryProject>(
   }
 
   if (!validDbSchemaName(config.dbSchema)) {
-    process.exit(1);
+    exitWithError(`invalid schema name ${config.dbSchema}`, undefined, 1);
   }
 
   if (config.debug) {
     setDebugFilter(config.debug);
   }
 
+  const makeNetworkOverrides = (project?: P) => {
+    // Apply the network endpoint and dictionary from the source project to the parent projects if they are not defined in the config
+    return omitBy(
+      {
+        endpoint: config.networkEndpoints ?? project?.network?.endpoint,
+        dictionary: config.networkDictionaries ?? project?.network?.dictionary,
+      },
+      isNil
+    );
+  };
+
   const project = await createProject(
     config.subquery,
     rawManifest,
     reader,
     await getCachedRoot(reader, config.root),
-    omitBy(
-      {
-        endpoint: config.networkEndpoints,
-        dictionary: config.networkDictionaries,
-      },
-      isNil
-    )
+    makeNetworkOverrides()
   ).catch((err: any) => {
     handleCreateSubqueryProjectError(err, pjson, rawManifest, logger);
-    process.exit(1);
+    exitWithError(err, logger, 1);
   });
 
   const createParentProject = async (cid: string): Promise<P> => {
@@ -156,14 +201,7 @@ export async function registerApp<P extends ISubqueryProject>(
       await reader.getProjectSchema(),
       reader,
       await getCachedRoot(reader, config.root),
-      omitBy(
-        // Apply the network endpoint and dictionary from the source project to the parent projects if they are not defined in the config
-        {
-          endpoint: config.networkEndpoints ?? project.network.endpoint,
-          dictionary: config.networkDictionaries ?? project.network.dictionary,
-        },
-        isNil
-      )
+      makeNetworkOverrides(project)
     );
   };
 

@@ -3,6 +3,12 @@
 
 type GetRange<T> = {value: T; startHeight: number; endHeight?: number};
 
+export class EntryNotFoundError extends Error {
+  constructor(height: number) {
+    super(`Entry not found at height ${height}`);
+  }
+}
+
 export class BlockHeightMap<T> {
   #map: Map<number, T>;
 
@@ -19,7 +25,7 @@ export class BlockHeightMap<T> {
     const details = this.getDetails(height);
 
     if (details === undefined) {
-      throw new Error(`Value at height ${height} was undefined`);
+      throw new EntryNotFoundError(height);
     }
 
     return details.value;
@@ -76,7 +82,7 @@ export class BlockHeightMap<T> {
 
   getWithinRange(startHeight: number, endHeight: number): Map<number, T> {
     const result = new Map<number, T>();
-    let previousKey = null;
+    let previousKey: number | null = null;
 
     for (const [key, value] of this.#map) {
       if (previousKey !== null && previousKey < startHeight && key >= startHeight) {

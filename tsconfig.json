@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "module": "commonjs",
-    "target": "es2021",
-    "noImplicitAny": false,
+    "target": "ES2022",
+    "lib": ["ES2022"],
     "noImplicitThis": true,
     "moduleResolution": "node",
     "outDir": "dist",
@@ -11,12 +11,14 @@
     "experimentalDecorators": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "lib": ["ES2017", "ES2020", "ES2021"],
     "emitDecoratorMetadata": true,
     "declaration": true,
     "sourceMap": true,
     "inlineSources": true,
     "composite": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noImplicitAny": false,
     "paths": {
       "@subql/utils": ["packages/utils/src"],
       "@subql/utils/*": ["packages/utils/src/*"],
@@ -32,8 +34,7 @@
       "@subql/types/*": ["packages/types/src/*"],
       "@subql/testing": ["packages/testing/src"],
       "@subql/testing/*": ["packages/testing/src/*"]
-    },
-    "skipLibCheck": true
+    }
   },
   "references": [
     {"path": "packages/cli"},

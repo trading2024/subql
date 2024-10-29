@@ -3,7 +3,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import rimraf from 'rimraf';
+import {rimraf} from 'rimraf';
 import {codegen, processFields, validateEntityName} from './codegen-controller';
 
 jest.mock('fs', () => {
@@ -49,12 +49,12 @@ describe('Codegen can generate schema (mocked)', () => {
         'TypeNotSupported',
         [
           // Ignoring to test unsupported scalar type
-          // @ts-ignore
           {
             name: 'notSupported',
             type: 'UnsupportedScalar',
             nullable: false,
             isArray: false,
+            isEnum: false,
           },
         ],
         []

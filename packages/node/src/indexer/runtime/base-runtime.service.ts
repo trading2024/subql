@@ -14,10 +14,10 @@ type GetLatestFinalizedHeight = () => number;
 
 @Injectable()
 export abstract class BaseRuntimeService {
-  parentSpecVersion: number;
-  specVersionMap: SpecVersion[];
-  protected currentRuntimeVersion: RuntimeVersion;
-  latestFinalizedHeight: number;
+  parentSpecVersion?: number;
+  specVersionMap: SpecVersion[] = [];
+  private currentRuntimeVersion?: RuntimeVersion;
+  latestFinalizedHeight?: number;
 
   constructor(protected apiService: ApiService) {}
 
@@ -47,11 +47,13 @@ export abstract class BaseRuntimeService {
 
   getSpecFromMap(
     blockHeight: number,
-    specVersions: SpecVersion[],
+    specVersions?: SpecVersion[],
   ): number | undefined {
     //return undefined block can not find inside range
-    const spec = specVersions.find(
-      (spec) => blockHeight >= spec.start && blockHeight <= spec.end,
+    const spec = specVersions?.find(
+      (spec) =>
+        blockHeight >= spec.start &&
+        (spec.end !== null ? blockHeight <= spec.end : true),
     );
     return spec ? Number(spec.id) : undefined;
   }
@@ -60,9 +62,8 @@ export abstract class BaseRuntimeService {
     const parentBlockHash = await this.api.rpc.chain.getBlockHash(
       Math.max(height - 1, 0),
     );
-    const runtimeVersion = await this.api.rpc.state.getRuntimeVersion(
-      parentBlockHash,
-    );
+    const runtimeVersion =
+      await this.api.rpc.state.getRuntimeVersion(parentBlockHash);
     const specVersion = runtimeVersion.specVersion.toNumber();
     return specVersion;
   }
@@ -83,7 +84,9 @@ export abstract class BaseRuntimeService {
       } else {
         for (const specVersion of this.specVersionMap) {
           if (
-            specVersion.start > parentSpecVersion.end &&
+            (parentSpecVersion.end !== null
+              ? specVersion.start > parentSpecVersion.end
+              : true) &&
             specVersion.start <= height
           ) {
             const blockHash = await this.api.rpc.chain.getBlockHash(

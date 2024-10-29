@@ -241,9 +241,12 @@ export async function updateDockerCompose(projectDir: string, chainManifestPath:
   let subqlNodeService = getSubqlNodeService(dockerCompose);
   if (subqlNodeService) {
     // If the service already exists, update its configuration
-    subqlNodeService.command = subqlNodeService.command.filter((cmd) => !cmd.startsWith('-f='));
+    subqlNodeService.command = subqlNodeService.command?.filter((cmd) => !cmd.startsWith('-f=')) ?? [];
     subqlNodeService.command.push(`-f=app/${path.basename(chainManifestPath)}`);
-    subqlNodeService.healthcheck.test = ['CMD', 'curl', '-f', `http://${serviceName}:3000/ready`];
+
+    if (subqlNodeService.healthcheck) {
+      subqlNodeService.healthcheck.test = ['CMD', 'curl', '-f', `http://${serviceName}:3000/ready`];
+    }
   } else {
     // Otherwise, create a new service configuration
     subqlNodeService = await getDefaultServiceConfiguration(chainManifestPath, serviceName);
